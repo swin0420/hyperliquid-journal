@@ -1,131 +1,179 @@
-import json
 import os
-from config import TRADES_FILE, DATA_DIR
+from sqlalchemy import create_engine, Column, String, Float, Integer, Text, BigInteger, Index
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from config import DATABASE_URL
 from hyperliquid import get_spot_name
 
-
-def ensure_data_dir():
-    """Ensure the data directory exists."""
-    os.makedirs(DATA_DIR, exist_ok=True)
+Base = declarative_base()
 
 
-def load_trades_data() -> dict:
-    """Load the full trades data including metadata."""
-    ensure_data_dir()
-    if not os.path.exists(TRADES_FILE):
-        return {"wallet": None, "trades": {}}
+class Trade(Base):
+    __tablename__ = 'trades'
 
-    with open(TRADES_FILE, "r") as f:
-        data = json.load(f)
-        # Handle old format (dict of trades without wrapper)
-        if "trades" not in data:
-            return {"wallet": None, "trades": data}
-        return data
+    id = Column(String, primary_key=True)
+    wallet_address = Column(String, nullable=False, index=True)
+    asset = Column(String, nullable=False)
+    direction = Column(String)
+    action = Column(String)
+    size = Column(Float)
+    price = Column(Float)
+    pnl = Column(Float, default=0)
+    fee = Column(Float, default=0)
+    timestamp = Column(BigInteger)
+    notes = Column(Text, default="")
 
-
-def load_trades() -> dict:
-    """
-    Load trades from JSON file.
-
-    Returns:
-        Dict mapping trade IDs to trade objects
-    """
-    return load_trades_data().get("trades", {})
+    __table_args__ = (
+        Index('idx_wallet_timestamp', 'wallet_address', 'timestamp'),
+    )
 
 
-def get_stored_wallet() -> str:
-    """Get the wallet address stored with the trades."""
-    return load_trades_data().get("wallet")
+# Database setup
+engine = None
+SessionLocal = None
+
+def init_db():
+    """Initialize database connection."""
+    global engine, SessionLocal
+    if not DATABASE_URL:
+        return False
+
+    # Railway uses postgres:// but SQLAlchemy needs postgresql://
+    db_url = DATABASE_URL.replace("postgres://", "postgresql://")
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    return True
 
 
-def save_trades(trades: dict, wallet: str = None):
-    """
-    Save trades to JSON file.
+def get_session():
+    """Get a database session."""
+    if not SessionLocal:
+        if not init_db():
+            return None
+    return SessionLocal()
 
-    Args:
-        trades: Dict mapping trade IDs to trade objects
-        wallet: Optional wallet address to store with trades
-    """
-    ensure_data_dir()
-    data = load_trades_data()
-    data["trades"] = trades
-    if wallet:
-        data["wallet"] = wallet
-    with open(TRADES_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+
+def load_trades(wallet_address: str) -> dict:
+    """Load trades for a specific wallet from database."""
+    session = get_session()
+    if not session:
+        return {}
+
+    try:
+        trades = session.query(Trade).filter(Trade.wallet_address == wallet_address.lower()).all()
+        return {t.id: {
+            "id": t.id,
+            "asset": t.asset,
+            "direction": t.direction,
+            "action": t.action,
+            "size": t.size,
+            "price": t.price,
+            "pnl": t.pnl,
+            "fee": t.fee,
+            "timestamp": t.timestamp,
+            "notes": t.notes or ""
+        } for t in trades}
+    finally:
+        session.close()
+
+
+def save_trades(trades: dict, wallet_address: str):
+    """Save trades for a specific wallet to database."""
+    session = get_session()
+    if not session:
+        return
+
+    wallet = wallet_address.lower()
+
+    try:
+        for trade_id, trade_data in trades.items():
+            existing = session.query(Trade).filter(Trade.id == trade_id).first()
+            if existing:
+                # Update existing trade
+                existing.asset = trade_data.get("asset", "")
+                existing.direction = trade_data.get("direction", "")
+                existing.action = trade_data.get("action", "")
+                existing.size = trade_data.get("size", 0)
+                existing.price = trade_data.get("price", 0)
+                existing.pnl = trade_data.get("pnl", 0)
+                existing.fee = trade_data.get("fee", 0)
+                existing.timestamp = trade_data.get("timestamp", 0)
+                existing.notes = trade_data.get("notes", "")
+            else:
+                # Create new trade
+                trade = Trade(
+                    id=trade_id,
+                    wallet_address=wallet,
+                    asset=trade_data.get("asset", ""),
+                    direction=trade_data.get("direction", ""),
+                    action=trade_data.get("action", ""),
+                    size=trade_data.get("size", 0),
+                    price=trade_data.get("price", 0),
+                    pnl=trade_data.get("pnl", 0),
+                    fee=trade_data.get("fee", 0),
+                    timestamp=trade_data.get("timestamp", 0),
+                    notes=trade_data.get("notes", "")
+                )
+                session.add(trade)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise e
+    finally:
+        session.close()
 
 
 def merge_trades(existing: dict, new_trades: list) -> dict:
-    """
-    Merge new trades with existing trades, preserving notes.
-
-    Args:
-        existing: Existing trades dict
-        new_trades: List of new trade objects from API
-
-    Returns:
-        Merged trades dict
-    """
+    """Merge new trades with existing trades, preserving notes."""
     for trade in new_trades:
         trade_id = trade["id"]
         if trade_id in existing:
-            # Preserve existing notes
             trade["notes"] = existing[trade_id].get("notes", "")
         existing[trade_id] = trade
     return existing
 
 
-def update_trade_notes(trade_id: str, notes: str) -> bool:
-    """
-    Update notes for a specific trade.
-
-    Args:
-        trade_id: The trade ID to update
-        notes: The new notes content
-
-    Returns:
-        True if successful, False if trade not found
-    """
-    trades = load_trades()
-    if trade_id not in trades:
+def update_trade_notes(trade_id: str, notes: str, wallet_address: str) -> bool:
+    """Update notes for a specific trade."""
+    session = get_session()
+    if not session:
         return False
 
-    trades[trade_id]["notes"] = notes
-    save_trades(trades)
-    return True
+    try:
+        trade = session.query(Trade).filter(
+            Trade.id == trade_id,
+            Trade.wallet_address == wallet_address.lower()
+        ).first()
+
+        if not trade:
+            return False
+
+        trade.notes = notes
+        session.commit()
+        return True
+    except Exception:
+        session.rollback()
+        return False
+    finally:
+        session.close()
 
 
-def get_trades_sorted(descending: bool = True) -> list:
-    """
-    Get all trades sorted by timestamp.
-
-    Args:
-        descending: If True, newest first (default)
-
-    Returns:
-        List of trades sorted by timestamp
-    """
-    trades = load_trades()
+def get_trades_sorted(wallet_address: str, descending: bool = True) -> list:
+    """Get all trades for a wallet sorted by timestamp."""
+    trades = load_trades(wallet_address)
     trade_list = list(trades.values())
     trade_list.sort(key=lambda x: x.get("timestamp", 0), reverse=descending)
     return trade_list
 
 
-def get_round_trips() -> list:
-    """
-    Group individual fills into round-trip trades (open -> close cycles).
-
-    Returns:
-        List of round-trip trade objects with entry/exit prices and P&L
-    """
-    trades = load_trades()
+def get_round_trips(wallet_address: str) -> list:
+    """Group individual fills into round-trip trades."""
+    trades = load_trades(wallet_address)
     if not trades:
         return []
 
-    # Sort fills by timestamp (oldest first for processing)
     fills = sorted(trades.values(), key=lambda x: x.get("timestamp", 0))
-
-    # Track open positions per asset: {asset: [(fill, remaining_size), ...]}
     open_positions = {}
     round_trips = []
 
@@ -139,13 +187,11 @@ def get_round_trips() -> list:
             open_positions[asset] = []
 
         if action == "open":
-            # Add to open positions
             open_positions[asset].append({
                 "fill": fill,
                 "remaining": size
             })
         elif action == "close" and open_positions[asset]:
-            # Match with open positions (FIFO)
             close_size = size
             entry_fills = []
             total_entry_value = 0
@@ -157,7 +203,6 @@ def get_round_trips() -> list:
                 available = open_pos["remaining"]
 
                 matched_size = min(close_size, available)
-                # Calculate proportional fee based on matched size
                 original_size = open_fill["size"]
                 proportional_fee = open_fill["fee"] * (matched_size / original_size) if original_size > 0 else 0
                 entry_fills.append({
@@ -180,7 +225,6 @@ def get_round_trips() -> list:
                 avg_entry = total_entry_value / total_entry_size
                 exit_price = fill["price"]
 
-                # Combine notes from entry and exit fills
                 all_notes = []
                 for ef in entry_fills:
                     entry_trade = trades.get(ef["id"], {})
@@ -189,7 +233,6 @@ def get_round_trips() -> list:
                 if fill.get("notes"):
                     all_notes.append(fill["notes"])
 
-                # Determine market type (spot assets start with @)
                 market_type = "spot" if asset.startswith("@") else "perp"
                 display_name = get_spot_name(asset) if market_type == "spot" else asset
 
@@ -213,35 +256,30 @@ def get_round_trips() -> list:
                 }
                 round_trips.append(round_trip)
 
-    # Sort by exit time, newest first
     round_trips.sort(key=lambda x: x["exit_time"], reverse=True)
     return round_trips
 
 
-def update_round_trip_notes(round_trip_id: str, notes: str) -> bool:
-    """
-    Update notes for a round trip (stores on the exit fill).
-
-    Args:
-        round_trip_id: The round trip ID (rt_<exit_fill_id>)
-        notes: The new notes content
-
-    Returns:
-        True if successful, False if not found
-    """
+def update_round_trip_notes(round_trip_id: str, notes: str, wallet_address: str) -> bool:
+    """Update notes for a round trip."""
     if not round_trip_id.startswith("rt_"):
         return False
+    exit_fill_id = round_trip_id[3:]
+    return update_trade_notes(exit_fill_id, notes, wallet_address)
 
-    exit_fill_id = round_trip_id[3:]  # Remove "rt_" prefix
-    return update_trade_notes(exit_fill_id, notes)
 
-
-def get_unique_assets() -> list:
-    """Get list of unique assets from all trades with display names."""
-    trades = load_trades()
+def get_unique_assets(wallet_address: str) -> list:
+    """Get list of unique assets from all trades for a wallet."""
+    trades = load_trades(wallet_address)
     assets = set(t.get("asset", "") for t in trades.values())
     result = []
     for asset in sorted([a for a in assets if a]):
         display_name = get_spot_name(asset) if asset.startswith("@") else asset
         result.append({"id": asset, "name": display_name})
     return result
+
+
+# Legacy functions for backward compatibility
+def get_stored_wallet() -> str:
+    """Deprecated - wallet is now per-request."""
+    return None

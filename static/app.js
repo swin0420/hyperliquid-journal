@@ -111,14 +111,10 @@ function setupEventListeners() {
 }
 
 async function loadConfig() {
-    try {
-        const res = await fetch('/api/config');
-        const config = await res.json();
-        if (config.wallet_address) {
-            walletInput.value = config.wallet_address;
-        }
-    } catch (e) {
-        console.error('Failed to load config:', e);
+    // Load wallet from localStorage if previously used
+    const savedWallet = localStorage.getItem('hl_wallet_address');
+    if (savedWallet) {
+        walletInput.value = savedWallet;
     }
 }
 
@@ -137,10 +133,19 @@ async function autoSync() {
 }
 
 async function loadRoundTrips() {
+    const wallet = walletInput.value.trim();
+    if (!wallet) {
+        roundTrips = [];
+        assets = [];
+        populateAssetFilter();
+        applyFilters();
+        return;
+    }
+
     try {
         const [rtRes, assetsRes] = await Promise.all([
-            fetch('/api/roundtrips'),
-            fetch('/api/assets')
+            fetch(`/api/roundtrips?wallet=${encodeURIComponent(wallet)}`),
+            fetch(`/api/assets?wallet=${encodeURIComponent(wallet)}`)
         ]);
         roundTrips = await rtRes.json();
         assets = await assetsRes.json();
@@ -391,6 +396,9 @@ async function syncTrades() {
         showStatus('Please enter a wallet address', 'error');
         return;
     }
+
+    // Save wallet to localStorage for convenience
+    localStorage.setItem('hl_wallet_address', wallet);
 
     syncBtn.disabled = true;
     showStatus('Syncing trades and funding...', '');
@@ -922,6 +930,12 @@ function closeModal() {
 async function saveNotes() {
     if (!currentTradeId) return;
 
+    const wallet = walletInput.value.trim();
+    if (!wallet) {
+        alert('No wallet address provided');
+        return;
+    }
+
     const notes = notesTextarea.value.trim();
     saveNotesBtn.disabled = true;
 
@@ -929,7 +943,7 @@ async function saveNotes() {
         const res = await fetch(`/api/trades/${currentTradeId}/notes`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notes })
+            body: JSON.stringify({ notes, wallet_address: wallet })
         });
 
         if (!res.ok) {
