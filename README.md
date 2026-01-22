@@ -8,7 +8,7 @@ A sleek trading journal for tracking your Hyperliquid perpetual futures and spot
 
 ## Use It Now
 
-**[https://hl-journal.up.railway.app](https://hl-journal.up.railway.app)**
+**[https://hl-journal.xyz](https://hl-journal.xyz)**
 
 Just enter your wallet address and click Sync. Your data is private and stored separately from other users.
 
