@@ -73,14 +73,16 @@
         display: flex;
         justify-content: center;
         margin-bottom: 1rem;
+        width: 100%;
     }
 
     .catgirl-mobile img {
-        height: 100px;
-        width: auto;
+        width: 100%;
+        max-width: 400px;
+        height: auto;
         border-radius: 12px;
-        opacity: 0.9;
-        filter: drop-shadow(0 0 15px rgba(255, 150, 200, 0.5));
+        opacity: 0.95;
+        filter: drop-shadow(0 0 20px rgba(255, 150, 200, 0.6));
     }
 }
 
