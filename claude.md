@@ -90,9 +90,16 @@ python app.py
 
 ## Deployment
 - **Hosting**: Railway
-- **Domain**: hl-journal.xyz (Namecheap)
+- **Domain**: hl-journal.xyz (Namecheap DNS → Railway CNAME)
+- **SSL**: Let's Encrypt (auto-issued by Railway)
 - **Database**: Railway PostgreSQL
 - **Repository**: https://github.com/swin0420/hyperliquid-journal
 
 ## Environment Variables
 - `DATABASE_URL` - PostgreSQL connection string (required for production)
+
+## Notes
+- Wallet address saved to browser localStorage for convenience
+- Desktop: hover to expand trade cards, catgirls on sides
+- Mobile: tap to toggle trade cards, animated Chocola gif at top
+- Date filters have From/To labels for clarity
