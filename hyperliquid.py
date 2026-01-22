@@ -1,0 +1,326 @@
+import requests
+from config import HYPERLIQUID_API_URL
+
+# Cache for spot metadata
+_spot_name_cache = {}
+
+
+def fetch_spot_meta() -> dict:
+    """
+    Fetch spot metadata to get token names for spot indices.
+
+    Returns:
+        Dict mapping spot index (e.g., "107") to token name (e.g., "HYPE/USDC")
+    """
+    global _spot_name_cache
+    if _spot_name_cache:
+        return _spot_name_cache
+
+    payload = {"type": "spotMeta"}
+    response = requests.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    # Build mapping from spot index to name
+    # Universe contains spot pairs with their names
+    universe = data.get("universe", [])
+    for spot in universe:
+        index = spot.get("index")
+        name = spot.get("name", "")
+        if index is not None:
+            # If name starts with @, try to build from tokens
+            if name.startswith("@") or not name:
+                tokens = spot.get("tokens", [])
+                # tokens[0] is base, tokens[1] is quote (usually USDC = 0)
+                # We need token metadata to resolve names
+                token_list = data.get("tokens", [])
+                if len(tokens) >= 2 and token_list:
+                    base_idx = tokens[0]
+                    quote_idx = tokens[1]
+                    base_name = None
+                    quote_name = None
+                    for t in token_list:
+                        if t.get("index") == base_idx:
+                            base_name = t.get("name")
+                        if t.get("index") == quote_idx:
+                            quote_name = t.get("name")
+                    if base_name:
+                        name = f"{base_name}/USDC" if quote_idx == 0 else f"{base_name}/{quote_name or '?'}"
+            _spot_name_cache[str(index)] = name
+
+    return _spot_name_cache
+
+
+def get_spot_name(asset: str) -> str:
+    """
+    Convert spot asset ID (@107) to readable name (HYPE/USDC).
+
+    Args:
+        asset: Asset string (e.g., "@107" or "BTC")
+
+    Returns:
+        Readable name
+    """
+    if not asset.startswith("@"):
+        return asset
+
+    spot_index = asset[1:]  # Remove @ prefix
+    spot_names = fetch_spot_meta()
+    return spot_names.get(spot_index, asset)
+
+
+def fetch_user_fills(wallet_address: str, aggregate_by_time: bool = True) -> list:
+    """
+    Fetch trading fills (trade history) for a wallet address from Hyperliquid.
+
+    Args:
+        wallet_address: The user's Hyperliquid wallet address
+        aggregate_by_time: If True, combines partial fills from the same order
+
+    Returns:
+        List of fill objects with trade details
+    """
+    payload = {
+        "type": "userFills",
+        "user": wallet_address,
+        "aggregateByTime": aggregate_by_time
+    }
+
+    response = requests.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_fill_to_trade(fill: dict) -> dict:
+    """
+    Convert a Hyperliquid fill object to our trade format.
+
+    Args:
+        fill: Raw fill object from Hyperliquid API
+
+    Returns:
+        Normalized trade object for our journal
+    """
+    asset = fill.get("coin", "")
+    is_spot = asset.startswith("@")
+    side = fill.get("side", "")  # B = buy, A = sell
+
+    if is_spot:
+        # Spot trading: Buy = open long, Sell = close long
+        # Spot doesn't have shorting
+        is_long = True
+        is_open = side == "B"  # Buy is open, Sell is close
+    else:
+        # Perp trading: Use the dir field
+        direction = fill.get("dir", "")
+        is_long = "Long" in direction
+        is_open = "Open" in direction
+
+    return {
+        "id": str(fill.get("tid", fill.get("oid", ""))),
+        "asset": asset,
+        "direction": "long" if is_long else "short",
+        "action": "open" if is_open else "close",
+        "price": float(fill.get("px", 0)),
+        "size": float(fill.get("sz", 0)),
+        "pnl": float(fill.get("closedPnl", 0)),
+        "fee": float(fill.get("fee", 0)),
+        "timestamp": fill.get("time", 0),
+        "hash": fill.get("hash", ""),
+        "order_id": fill.get("oid"),
+        "side": side,
+        "start_position": float(fill.get("startPosition", 0)),
+        "notes": ""  # User can add notes later
+    }
+
+
+def fetch_and_parse_trades(wallet_address: str) -> list:
+    """
+    Fetch fills from Hyperliquid and parse them into trade objects.
+
+    Args:
+        wallet_address: The user's wallet address
+
+    Returns:
+        List of parsed trade objects
+    """
+    fills = fetch_user_fills(wallet_address)
+    return [parse_fill_to_trade(fill) for fill in fills]
+
+
+def fetch_user_funding(wallet_address: str, start_time: int = 0) -> list:
+    """
+    Fetch funding payment history for a wallet address.
+
+    Args:
+        wallet_address: The user's Hyperliquid wallet address
+        start_time: Start timestamp in milliseconds (0 = all time)
+
+    Returns:
+        List of funding payment objects
+    """
+    payload = {
+        "type": "userFunding",
+        "user": wallet_address,
+        "startTime": start_time
+    }
+
+    response = requests.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_funding_events(funding_list: list) -> list:
+    """
+    Parse funding payments into a list of events with timestamps.
+
+    Args:
+        funding_list: Raw funding data from API
+
+    Returns:
+        List of funding event dicts
+    """
+    events = []
+    for item in funding_list:
+        delta = item.get("delta", {})
+        events.append({
+            "coin": delta.get("coin", ""),
+            "usdc": float(delta.get("usdc", 0)),
+            "timestamp": item.get("time", 0),
+            "hash": item.get("hash", "")
+        })
+    return events
+
+
+def fetch_funding_events(wallet_address: str) -> list:
+    """
+    Fetch funding payment events.
+
+    Args:
+        wallet_address: The user's wallet address
+
+    Returns:
+        List of funding events with timestamps
+    """
+    funding_data = fetch_user_funding(wallet_address)
+    return parse_funding_events(funding_data)
+
+
+def fetch_open_orders(wallet_address: str) -> list:
+    """
+    Fetch open orders for a wallet using frontendOpenOrders for full details.
+
+    Args:
+        wallet_address: The user's wallet address
+
+    Returns:
+        List of open orders with trigger prices
+    """
+    payload = {
+        "type": "frontendOpenOrders",
+        "user": wallet_address
+    }
+
+    response = requests.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_open_positions(wallet_address: str) -> list:
+    """
+    Fetch current open positions from clearinghouse state.
+
+    Args:
+        wallet_address: The user's wallet address
+
+    Returns:
+        List of open position objects
+    """
+    payload = {
+        "type": "clearinghouseState",
+        "user": wallet_address
+    }
+
+    response = requests.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    # Fetch open orders to find TP/SL
+    open_orders = fetch_open_orders(wallet_address)
+
+    # Group TP/SL orders by asset
+    tp_sl_by_asset = {}
+    for order in open_orders:
+        asset = order.get("coin", "")
+        order_type = order.get("orderType", "")
+        trigger_px = order.get("triggerPx")
+        is_tp_sl = order.get("isPositionTpsl", False)
+
+        if not trigger_px or not is_tp_sl:
+            continue
+
+        if asset not in tp_sl_by_asset:
+            tp_sl_by_asset[asset] = {"take_profit": None, "stop_loss": None}
+
+        price = float(trigger_px)
+        if "Take Profit" in order_type:
+            tp_sl_by_asset[asset]["take_profit"] = price
+        elif "Stop" in order_type:
+            tp_sl_by_asset[asset]["stop_loss"] = price
+
+    positions = []
+    asset_positions = data.get("assetPositions", [])
+
+    for item in asset_positions:
+        pos = item.get("position", {})
+        size = float(pos.get("szi", 0))
+
+        # Skip if no position
+        if size == 0:
+            continue
+
+        asset = pos.get("coin", "")
+        entry_px = float(pos.get("entryPx", 0))
+        unrealized_pnl = float(pos.get("unrealizedPnl", 0))
+        leverage = pos.get("leverage", {})
+        liq_px = pos.get("liquidationPx")
+        is_long = size > 0
+
+        # Get TP/SL for this asset
+        tp_sl = tp_sl_by_asset.get(asset, {})
+
+        positions.append({
+            "asset": asset,
+            "size": abs(size),
+            "direction": "long" if is_long else "short",
+            "entry_price": entry_px,
+            "unrealized_pnl": unrealized_pnl,
+            "leverage": leverage.get("value", 1) if isinstance(leverage, dict) else leverage,
+            "liquidation_price": float(liq_px) if liq_px else None,
+            "margin_used": float(pos.get("marginUsed", 0)),
+            "position_value": float(pos.get("positionValue", 0)),
+            "take_profit": tp_sl.get("take_profit"),
+            "stop_loss": tp_sl.get("stop_loss")
+        })
+
+    return positions

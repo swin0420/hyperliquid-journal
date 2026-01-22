@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Journal - Hyperliquid</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=21">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="catgirl-left"></div>
+    <div class="catgirl-right"></div>
+    <div class="container">
+        <header>
+            <h1>Trading Journal</h1>
+            <p class="subtitle">Hyperliquid Trade History</p>
+        </header>
+
+        <section class="config-section">
+            <div class="config-row">
+                <label for="wallet-input">Wallet Address:</label>
+                <input type="text" id="wallet-input" placeholder="0x..." />
+                <button id="sync-btn">Sync Trades</button>
+            </div>
+            <div id="sync-status" class="status"></div>
+        </section>
+
+        <section class="stats-section">
+            <div class="stat-card">
+                <span class="stat-label">Total Trades</span>
+                <span class="stat-value" id="total-trades">0</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Net P&L</span>
+                <span class="stat-value" id="total-pnl">$0.00</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Funding</span>
+                <span class="stat-value" id="total-funding">$0.00</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Total Fees</span>
+                <span class="stat-value" id="total-fees">$0.00</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Win Rate</span>
+                <span class="stat-value" id="win-rate">0%</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Best Win Streak</span>
+                <span class="stat-value" id="best-streak">-</span>
+            </div>
+        </section>
+
+        <section class="positions-section">
+            <h2>Open Positions</h2>
+            <div id="positions-list" class="positions-list">
+                <p class="empty-state">No open positions</p>
+            </div>
+        </section>
+
+        <section class="chart-section">
+            <h2>Cumulative P&L</h2>
+            <div class="chart-container">
+                <canvas id="pnl-chart"></canvas>
+            </div>
+        </section>
+
+        <section class="comparison-section">
+            <h2>Period Comparison</h2>
+            <div class="comparison-grid">
+                <div class="comparison-card">
+                    <h3>This Month</h3>
+                    <div class="comparison-stats">
+                        <div class="comp-stat">
+                            <span class="comp-label">Trades</span>
+                            <span class="comp-value" id="this-month-trades">0</span>
+                        </div>
+                        <div class="comp-stat">
+                            <span class="comp-label">Net P&L</span>
+                            <span class="comp-value" id="this-month-pnl">$0.00</span>
+                        </div>
+                        <div class="comp-stat">
+                            <span class="comp-label">Win Rate</span>
+                            <span class="comp-value" id="this-month-winrate">0%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="comparison-card">
+                    <h3>Last Month</h3>
+                    <div class="comparison-stats">
+                        <div class="comp-stat">
+                            <span class="comp-label">Trades</span>
+                            <span class="comp-value" id="last-month-trades">0</span>
+                        </div>
+                        <div class="comp-stat">
+                            <span class="comp-label">Net P&L</span>
+                            <span class="comp-value" id="last-month-pnl">$0.00</span>
+                        </div>
+                        <div class="comp-stat">
+                            <span class="comp-label">Win Rate</span>
+                            <span class="comp-value" id="last-month-winrate">0%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="comparison-card change-card">
+                    <h3>Change</h3>
+                    <div class="comparison-stats">
+                        <div class="comp-stat">
+                            <span class="comp-label">Trades</span>
+                            <span class="comp-value" id="change-trades">-</span>
+                        </div>
+                        <div class="comp-stat">
+                            <span class="comp-label">P&L</span>
+                            <span class="comp-value" id="change-pnl">-</span>
+                        </div>
+                        <div class="comp-stat">
+                            <span class="comp-label">Win Rate</span>
+                            <span class="comp-value" id="change-winrate">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+        <section class="trades-section">
+            <div class="trades-header">
+                <h2>Trade History</h2>
+                <div class="filters">
+                    <div class="quick-filters">
+                        <button class="quick-btn" data-period="24h">24H</button>
+                        <button class="quick-btn" data-period="7d">7D</button>
+                        <button class="quick-btn" data-period="30d">30D</button>
+                        <button class="quick-btn" data-period="all">All</button>
+                    </div>
+                    <select id="market-filter">
+                        <option value="">All Markets</option>
+                        <option value="perp">Perps Only</option>
+                        <option value="spot">Spot Only</option>
+                    </select>
+                    <select id="asset-filter">
+                        <option value="">All Assets</option>
+                    </select>
+                    <select id="pnl-filter">
+                        <option value="">All Trades</option>
+                        <option value="winners">Winners Only</option>
+                        <option value="losers">Losers Only</option>
+                    </select>
+                    <input type="date" id="date-from" title="From date" />
+                    <input type="date" id="date-to" title="To date" />
+                    <select id="sort-filter">
+                        <option value="recent">Most Recent</option>
+                        <option value="pnl_high">Highest P&L</option>
+                        <option value="pnl_low">Lowest P&L</option>
+                    </select>
+                </div>
+            </div>
+            <div id="trades-list" class="trades-list">
+                <p class="empty-state">No trades yet. Enter your wallet address and click Sync.</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Notes Modal -->
+    <div id="notes-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Trade Notes</h3>
+                <button class="close-btn" id="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="notes-textarea" placeholder="Add your reflections, lessons learned, or any notes about this trade..."></textarea>
+            </div>
+            <div class="modal-footer">
+                <button id="save-notes-btn">Save Notes</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=11"></script>
+</body>
+</html>
