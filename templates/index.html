@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=21">
+    <link rel="stylesheet" href="/static/style.css?v=22">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -18,6 +18,11 @@
             <h1>Trading Journal</h1>
             <p class="subtitle">Hyperliquid Trade History</p>
         </header>
+
+        <div class="catgirl-mobile">
+            <img src="/static/catgirl-left.png" alt="Chocola">
+            <img src="/static/catgirl-right.png" alt="Vanilla">
+        </div>
 
         <section class="config-section">
             <div class="config-row">
@@ -150,8 +155,14 @@
                         <option value="winners">Winners Only</option>
                         <option value="losers">Losers Only</option>
                     </select>
-                    <input type="date" id="date-from" title="From date" />
-                    <input type="date" id="date-to" title="To date" />
+                    <div class="date-input-wrapper">
+                        <label for="date-from">From</label>
+                        <input type="date" id="date-from" />
+                    </div>
+                    <div class="date-input-wrapper">
+                        <label for="date-to">To</label>
+                        <input type="date" id="date-to" />
+                    </div>
                     <select id="sort-filter">
                         <option value="recent">Most Recent</option>
                         <option value="pnl_high">Highest P&L</option>

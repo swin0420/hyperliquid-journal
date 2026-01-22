@@ -506,7 +506,7 @@ function createTradeCard(trade) {
     const marketBadge = trade.market_type === 'spot' ? '<span class="market-badge spot">SPOT</span>' : '';
 
     return `
-        <div class="trade-card ${trade.direction}" onmouseenter="expandTradeCard(this)" onmouseleave="collapseTradeCard(this)">
+        <div class="trade-card ${trade.direction}" onclick="toggleTradeCard(this)" onmouseenter="expandTradeCard(this)" onmouseleave="collapseTradeCard(this)">
             <div class="trade-summary">
                 <span class="trade-asset">${displayName} ${marketBadge}</span>
                 <span class="trade-direction ${trade.direction}">${trade.direction}</span>
@@ -546,7 +546,7 @@ function createTradeCard(trade) {
                     </div>` : ''}
                 </div>
                 ${notesPreview ? `<div class="trade-notes-preview">${notesPreview}</div>` : ''}
-                <button class="notes-btn ${hasNotes ? 'has-notes' : ''}" onclick="openNotesModal('${trade.id}')">
+                <button class="notes-btn ${hasNotes ? 'has-notes' : ''}" onclick="event.stopPropagation(); openNotesModal('${trade.id}')">
                     ${hasNotes ? 'Edit Notes' : 'Add Notes'}
                 </button>
             </div>
@@ -900,16 +900,35 @@ function calculatePeriodStats(trades, startTime, endTime) {
     };
 }
 
-function expandTradeCard(card) {
+function toggleTradeCard(card) {
     const details = card.querySelector('.trade-details');
-    details.hidden = false;
-    card.classList.add('expanded');
+    const isExpanded = card.classList.contains('expanded');
+
+    if (isExpanded) {
+        details.hidden = true;
+        card.classList.remove('expanded');
+    } else {
+        details.hidden = false;
+        card.classList.add('expanded');
+    }
+}
+
+function expandTradeCard(card) {
+    // Only expand on hover for non-touch devices
+    if (window.matchMedia('(hover: hover)').matches) {
+        const details = card.querySelector('.trade-details');
+        details.hidden = false;
+        card.classList.add('expanded');
+    }
 }
 
 function collapseTradeCard(card) {
-    const details = card.querySelector('.trade-details');
-    details.hidden = true;
-    card.classList.remove('expanded');
+    // Only collapse on mouse leave for non-touch devices
+    if (window.matchMedia('(hover: hover)').matches) {
+        const details = card.querySelector('.trade-details');
+        details.hidden = true;
+        card.classList.remove('expanded');
+    }
 }
 
 function openNotesModal(tradeId) {

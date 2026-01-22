@@ -68,6 +68,26 @@
     .catgirl-right {
         display: none;
     }
+
+    .catgirl-mobile {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .catgirl-mobile img {
+        height: 120px;
+        width: auto;
+        opacity: 0.85;
+        filter: drop-shadow(0 0 10px rgba(255, 150, 200, 0.4));
+    }
+}
+
+@media (min-width: 1301px) {
+    .catgirl-mobile {
+        display: none;
+    }
 }
 
 /* Aurora Animation */
@@ -347,6 +367,18 @@ button:disabled {
 
 .filters input[type="date"] {
     color-scheme: dark;
+}
+
+.date-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.date-input-wrapper label {
+    color: #888;
+    font-size: 0.75rem;
+    font-weight: 500;
 }
 
 .quick-filters {
