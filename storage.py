@@ -38,8 +38,8 @@ def init_db():
     if not DATABASE_URL:
         return False
 
-    # Railway uses postgres:// but SQLAlchemy needs postgresql://
-    db_url = DATABASE_URL.replace("postgres://", "postgresql://")
+    # Railway uses postgres:// but SQLAlchemy needs postgresql+psycopg://
+    db_url = DATABASE_URL.replace("postgres://", "postgresql+psycopg://").replace("postgresql://", "postgresql+psycopg://")
     engine = create_engine(db_url)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
