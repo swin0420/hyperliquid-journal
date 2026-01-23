@@ -36,7 +36,7 @@ trade-journal/
 - **Multi-user**: Each wallet's data stored privately in PostgreSQL
 - Sync trades from Hyperliquid API by wallet address
 - Track P&L, fees, funding, win rate, best win streak
-- Open positions display with unrealized P&L
+- Open positions display with current price and unrealized P&L
 - Cumulative P&L chart
 - Period comparison (this month vs last month)
 - Trade filtering (by date, asset, market type, P&L)
@@ -47,10 +47,11 @@ trade-journal/
 All endpoints require wallet address (query param, body, or header).
 
 - `GET /` - Main journal page
+- `GET /api/init?wallet=0x...` - Get roundtrips + assets (combined, faster)
 - `GET /api/trades?wallet=0x...` - Get all trades
 - `POST /api/trades/sync` - Sync trades from Hyperliquid
 - `GET /api/roundtrips?wallet=0x...` - Get round-trip trades
-- `GET /api/positions?wallet=0x...` - Get open positions
+- `GET /api/positions?wallet=0x...` - Get open positions with current prices
 - `GET /api/funding?wallet=0x...` - Get funding history
 - `GET /api/assets?wallet=0x...` - Get unique traded assets
 - `PUT /api/trades/<id>/notes` - Update trade notes
@@ -98,8 +99,15 @@ python app.py
 ## Environment Variables
 - `DATABASE_URL` - PostgreSQL connection string (required for production)
 
+## Performance Optimizations
+- **Parallel API calls**: Hyperliquid API calls (clearinghouseState, allMids, openOrders) run concurrently
+- **Sync cooldown**: Auto-sync skipped if synced within 30 seconds (per-wallet)
+- **Combined endpoint**: `/api/init` returns roundtrips + assets in single request
+- **Image preloading**: Desktop catgirl images preloaded for faster display
+
 ## Notes
 - Wallet address saved to browser localStorage for convenience
 - Desktop: hover to expand trade cards, catgirls on sides
 - Mobile: tap to toggle trade cards, animated Chocola gif at top
 - Date filters have From/To labels for clarity
+- Manual "Sync" button always syncs (bypasses cooldown)
