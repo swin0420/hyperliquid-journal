@@ -227,6 +227,10 @@ function renderPositions() {
                         <span class="value">$${formatNumber(pos.entry_price)}</span>
                     </div>
                     <div class="position-detail">
+                        <span class="label">Current</span>
+                        <span class="value">$${formatNumber(pos.current_price)}</span>
+                    </div>
+                    <div class="position-detail">
                         <span class="label">Leverage</span>
                         <span class="value">${pos.leverage}x</span>
                     </div>

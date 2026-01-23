@@ -218,6 +218,24 @@ def fetch_funding_events(wallet_address: str) -> list:
     return parse_funding_events(funding_data)
 
 
+def fetch_all_mids() -> dict:
+    """
+    Fetch current mid prices for all assets.
+
+    Returns:
+        Dict mapping asset name to mid price
+    """
+    payload = {"type": "allMids"}
+
+    response = requests.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def fetch_open_orders(wallet_address: str) -> list:
     """
     Fetch open orders for a wallet using frontendOpenOrders for full details.
@@ -265,7 +283,8 @@ def fetch_open_positions(wallet_address: str) -> list:
     response.raise_for_status()
     data = response.json()
 
-    # Fetch open orders to find TP/SL
+    # Fetch current prices and open orders
+    all_mids = fetch_all_mids()
     open_orders = fetch_open_orders(wallet_address)
 
     # Group TP/SL orders by asset
@@ -309,11 +328,15 @@ def fetch_open_positions(wallet_address: str) -> list:
         # Get TP/SL for this asset
         tp_sl = tp_sl_by_asset.get(asset, {})
 
+        # Get current price from allMids
+        current_price = float(all_mids.get(asset, 0))
+
         positions.append({
             "asset": asset,
             "size": abs(size),
             "direction": "long" if is_long else "short",
             "entry_price": entry_px,
+            "current_price": current_price,
             "unrealized_pnl": unrealized_pnl,
             "leverage": leverage.get("value", 1) if isinstance(leverage, dict) else leverage,
             "liquidation_price": float(liq_px) if liq_px else None,
