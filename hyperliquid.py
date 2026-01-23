@@ -1,4 +1,5 @@
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import HYPERLIQUID_API_URL
 
 # Cache for spot metadata
@@ -260,6 +261,21 @@ def fetch_open_orders(wallet_address: str) -> list:
     return response.json()
 
 
+def _fetch_clearinghouse_state(wallet_address: str) -> dict:
+    """Fetch clearinghouse state for a wallet."""
+    payload = {
+        "type": "clearinghouseState",
+        "user": wallet_address
+    }
+    response = requests.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def fetch_open_positions(wallet_address: str) -> list:
     """
     Fetch current open positions from clearinghouse state.
@@ -270,22 +286,26 @@ def fetch_open_positions(wallet_address: str) -> list:
     Returns:
         List of open position objects
     """
-    payload = {
-        "type": "clearinghouseState",
-        "user": wallet_address
-    }
+    # Parallel fetch: clearinghouse state, all mids, and open orders
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(_fetch_clearinghouse_state, wallet_address): 'state',
+            executor.submit(fetch_all_mids): 'mids',
+            executor.submit(fetch_open_orders, wallet_address): 'orders'
+        }
 
-    response = requests.post(
-        HYPERLIQUID_API_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    data = response.json()
+        results = {}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception as e:
+                # If any call fails, raise the error
+                raise e
 
-    # Fetch current prices and open orders
-    all_mids = fetch_all_mids()
-    open_orders = fetch_open_orders(wallet_address)
+    data = results['state']
+    all_mids = results['mids']
+    open_orders = results['orders']
 
     # Group TP/SL orders by asset
     tp_sl_by_asset = {}

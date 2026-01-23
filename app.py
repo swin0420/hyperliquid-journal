@@ -92,6 +92,19 @@ def update_notes(trade_id: str):
         return jsonify({"error": "Trade not found"}), 404
 
 
+@app.route("/api/init", methods=["GET"])
+def init_data():
+    """Get initial data (roundtrips + assets) in a single call."""
+    wallet = get_wallet_from_request()
+    if not wallet:
+        return jsonify({"error": "Wallet address required"}), 400
+
+    return jsonify({
+        "roundtrips": get_round_trips(wallet),
+        "assets": get_unique_assets(wallet)
+    })
+
+
 @app.route("/api/roundtrips", methods=["GET"])
 def get_roundtrips():
     """Get all round-trip trades (paired entry/exit) for a wallet."""

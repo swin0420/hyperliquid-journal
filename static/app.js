@@ -118,11 +118,36 @@ async function loadConfig() {
     }
 }
 
+// Sync cooldown - skip auto-sync if synced within this time
+const SYNC_COOLDOWN_MS = 30000; // 30 seconds
+
+function getSyncCacheKey(wallet) {
+    return `hl_last_sync_${wallet.toLowerCase()}`;
+}
+
+function shouldSkipSync(wallet) {
+    const cacheKey = getSyncCacheKey(wallet);
+    const lastSync = localStorage.getItem(cacheKey);
+    if (!lastSync) return false;
+    return Date.now() - parseInt(lastSync) < SYNC_COOLDOWN_MS;
+}
+
+function updateSyncTimestamp(wallet) {
+    const cacheKey = getSyncCacheKey(wallet);
+    localStorage.setItem(cacheKey, Date.now().toString());
+}
+
 async function autoSync() {
     const wallet = walletInput.value.trim();
     if (wallet) {
-        showStatus('Auto-syncing trades...', '');
-        await syncTrades();
+        if (shouldSkipSync(wallet)) {
+            // Skip sync, just load cached data from DB
+            showStatus('Loading cached data...', '');
+            await Promise.all([loadRoundTrips(), loadFunding()]);
+        } else {
+            showStatus('Auto-syncing trades...', '');
+            await syncTrades();
+        }
         await loadPositions();
         startPositionRefresh();
     } else {
@@ -143,12 +168,11 @@ async function loadRoundTrips() {
     }
 
     try {
-        const [rtRes, assetsRes] = await Promise.all([
-            fetch(`/api/roundtrips?wallet=${encodeURIComponent(wallet)}`),
-            fetch(`/api/assets?wallet=${encodeURIComponent(wallet)}`)
-        ]);
-        roundTrips = await rtRes.json();
-        assets = await assetsRes.json();
+        // Combined endpoint - single request for roundtrips + assets
+        const res = await fetch(`/api/init?wallet=${encodeURIComponent(wallet)}`);
+        const data = await res.json();
+        roundTrips = data.roundtrips || [];
+        assets = data.assets || [];
 
         populateAssetFilter();
         applyFilters();
@@ -425,6 +449,7 @@ async function syncTrades() {
         }
 
         showStatus(`Synced ${data.total_trades} fills`, 'success');
+        updateSyncTimestamp(wallet);
         await loadRoundTrips();
         await loadPositions();
         startPositionRefresh();
