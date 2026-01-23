@@ -111,3 +111,4 @@ python app.py
 - Mobile: tap to toggle trade cards, animated Chocola gif at top
 - Date filters have From/To labels for clarity
 - Manual "Sync" button always syncs (bypasses cooldown)
+- Code reviewed Jan 2026: clean structure, proper error handling, no security issues
