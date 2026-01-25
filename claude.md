@@ -129,6 +129,131 @@ python app.py
 - Individual index on `wallet_address`
 - Individual index on `asset`
 
+## Data Structures
+
+### Trade Object (from Hyperliquid API)
+```python
+{
+    "id": str,              # Unique trade ID (tid from API)
+    "asset": str,           # e.g., "BTC", "ETH", "@107" (spot)
+    "direction": str,       # "long" | "short" (Direction enum)
+    "action": str,          # "open" | "close" (Action enum)
+    "price": float,         # Execution price
+    "size": float,          # Position size
+    "pnl": float,           # Realized P&L (closedPnl from API)
+    "fee": float,           # Trading fee
+    "timestamp": int,       # Unix timestamp in milliseconds
+    "notes": str            # User notes
+}
+```
+
+### Round Trip Object (computed)
+```python
+{
+    "id": str,              # "rt_{exit_fill_id}"
+    "asset": str,           # Trading pair
+    "display_name": str,    # Human-readable name (e.g., "HYPE/USDC")
+    "market_type": str,     # "spot" | "perp" (MarketType enum)
+    "direction": str,       # "long" | "short"
+    "entry_price": float,   # Weighted average entry
+    "exit_price": float,    # Exit price
+    "size": float,          # Total position size
+    "pnl": float,           # Realized P&L
+    "fees": float,          # Total fees (entry + exit)
+    "entry_time": int,      # First entry timestamp
+    "exit_time": int,       # Exit timestamp
+    "duration_ms": int,     # Trade duration
+    "entry_fill_ids": list, # List of entry trade IDs
+    "exit_fill_id": str,    # Exit trade ID
+    "notes": str            # Combined notes from all fills
+}
+```
+
+### Position Object (from Hyperliquid API)
+```python
+{
+    "asset": str,           # Trading pair
+    "size": float,          # Absolute position size
+    "direction": str,       # "long" | "short"
+    "entry_price": float,   # Average entry price
+    "current_price": float, # Current market price
+    "unrealized_pnl": float,# Unrealized P&L
+    "leverage": float,      # Position leverage
+    "liquidation_price": float | None,
+    "margin_used": float,
+    "position_value": float,
+    "take_profit": float | None,
+    "stop_loss": float | None
+}
+```
+
+## Performance Benchmarks
+
+### Target Metrics
+| Operation | Target | Notes |
+|-----------|--------|-------|
+| `/api/init` | <500ms | Cached round-trips |
+| `/api/positions` | <1s | 3 parallel API calls |
+| `/api/trades/sync` | <3s | Depends on trade count |
+| DB query (by wallet) | <50ms | With indexes |
+| Round-trip computation | <100ms | For <1000 trades |
+
+### Bottlenecks to Monitor
+- Hyperliquid API latency (typically 200-500ms per call)
+- Round-trip computation for wallets with >5000 trades
+- PostgreSQL connection pool exhaustion under load
+
+### Profiling Tips
+```python
+# Add timing to endpoints
+import time
+start = time.perf_counter()
+# ... operation
+logger.info("Operation took %.3fs", time.perf_counter() - start)
+```
+
+## Debugging Tips
+
+### Common Issues
+1. **"Invalid wallet address format"** - Ensure wallet is 0x + 40 hex chars
+2. **Timeout errors** - Check Hyperliquid API status, increase REQUEST_TIMEOUT
+3. **Empty round-trips** - Verify trades have both "open" and "close" actions
+4. **Cache staleness** - Call `invalidate_round_trip_cache(wallet)` after manual DB changes
+
+### Debug Logging
+```bash
+# Enable debug logging
+export FLASK_ENV=development
+export LOG_LEVEL=DEBUG
+python app.py
+```
+
+### Database Inspection
+```sql
+-- Check trade count by wallet
+SELECT wallet_address, COUNT(*) FROM trades GROUP BY wallet_address;
+
+-- Find orphaned opens (no matching close)
+SELECT asset, direction, COUNT(*)
+FROM trades
+WHERE action = 'open'
+GROUP BY asset, direction;
+```
+
+### Scheduler Debugging
+```python
+from scheduler import get_scheduler
+scheduler = get_scheduler()
+print(scheduler.get_jobs())  # List all scheduled jobs
+```
+
+## Future Improvements
+- [ ] Rate limiting on API endpoints
+- [ ] WebSocket for real-time position updates
+- [ ] Trade analytics dashboard (Sharpe ratio, drawdown)
+- [ ] Export trades to CSV
+- [ ] Telegram/Discord notifications for large P&L
+
 ## Notes
 - Wallet address saved to browser localStorage for convenience
 - Desktop: hover to expand trade cards, catgirls on sides
