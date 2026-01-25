@@ -60,8 +60,13 @@ class NewsItem:
 
 
 def _get_http_session() -> requests.Session:
-    """Create a requests session with retry logic."""
+    """Create a requests session with retry logic and proper headers."""
     session = requests.Session()
+    # Set User-Agent to avoid being blocked by APIs
+    session.headers.update({
+        "User-Agent": "HLJournal/1.0 (Sentiment Bot; +https://hl-journal.xyz)",
+        "Accept": "application/json"
+    })
     retry_strategy = Retry(
         total=MAX_RETRIES,
         backoff_factor=RETRY_BACKOFF,

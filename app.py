@@ -572,19 +572,40 @@ def debug_sentiment():
         }
 
         # Raw API test to debug connection issues
+        headers = {"User-Agent": "HLJournal/1.0 (Sentiment Bot)"}
         try:
             import requests
+            # Test CryptoCompare
             raw_resp = requests.get(
                 "https://min-api.cryptocompare.com/data/v2/news/",
                 params={"lang": "EN", "sortOrder": "latest"},
+                headers=headers,
                 timeout=10
             )
             raw_data = raw_resp.json()
             result["raw_api_test"] = {
-                "status_code": raw_resp.status_code,
-                "total_items": len(raw_data.get("Data", [])),
-                "sample_title": raw_data.get("Data", [{}])[0].get("title", "N/A")[:80] if raw_data.get("Data") else None
+                "cryptocompare": {
+                    "status_code": raw_resp.status_code,
+                    "total_items": len(raw_data.get("Data", [])),
+                    "response_message": raw_data.get("Message", ""),
+                    "sample_title": raw_data.get("Data", [{}])[0].get("title", "N/A")[:80] if raw_data.get("Data") else None
+                }
             }
+
+            # Test CryptoPanic
+            if CRYPTOPANIC_API_KEY:
+                cp_resp = requests.get(
+                    "https://cryptopanic.com/api/v1/posts/",
+                    params={"auth_token": CRYPTOPANIC_API_KEY, "kind": "news", "public": "true"},
+                    headers=headers,
+                    timeout=10
+                )
+                cp_data = cp_resp.json()
+                result["raw_api_test"]["cryptopanic"] = {
+                    "status_code": cp_resp.status_code,
+                    "total_items": len(cp_data.get("results", [])),
+                    "sample_title": cp_data.get("results", [{}])[0].get("title", "N/A")[:80] if cp_data.get("results") else None
+                }
         except Exception as e:
             result["raw_api_test"] = {"error": str(e)}
 
