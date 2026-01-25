@@ -52,6 +52,26 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
     except Exception as e:
         logger.warning("Scheduler already running or failed to start: %s", e)
 
+    # Auto-start sentiment bot if configured
+    if all([DATABASE_URL, ANTHROPIC_API_KEY, DISCORD_WEBHOOK_URL]):
+        try:
+            from sentiment import create_sentiment_bot, destroy_sentiment_bot
+            logger.info("Auto-starting sentiment bot...")
+            bot = create_sentiment_bot(
+                database_url=DATABASE_URL,
+                anthropic_api_key=ANTHROPIC_API_KEY,
+                discord_webhook_url=DISCORD_WEBHOOK_URL,
+                cryptopanic_api_key=CRYPTOPANIC_API_KEY,
+                poll_interval=SENTIMENT_POLL_INTERVAL
+            )
+            bot.start(send_startup_message=False)  # Don't spam Discord on every deploy
+            atexit.register(destroy_sentiment_bot)
+            logger.info("Sentiment bot auto-started successfully")
+        except Exception as e:
+            logger.warning("Failed to auto-start sentiment bot: %s", e)
+    else:
+        logger.info("Sentiment bot not configured, skipping auto-start")
+
 # Ethereum address pattern: 0x followed by 40 hex characters
 WALLET_PATTERN = re.compile(r'^0x[a-fA-F0-9]{40}$')
 
