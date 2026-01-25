@@ -670,9 +670,14 @@ def debug_sentiment():
                     items_to_analyze = new_items if new_items else (all_items if force_analyze else [])
 
                     if analyze_sample and items_to_analyze and ANTHROPIC_API_KEY:
-                        analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
-                        sample = items_to_analyze[0]
-                        analysis = analyzer.analyze_single(sample)
+                        try:
+                            analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
+                            sample = items_to_analyze[0]
+                            result["analyzing_item"] = {"id": sample.id, "title": sample.title[:80]}
+                            analysis = analyzer.analyze_single(sample)
+                        except Exception as analysis_error:
+                            result["analysis_error"] = str(analysis_error)
+                            analysis = None
                         if analysis:
                             result["sample_analysis"] = {
                                 "news_id": analysis.news_id,
