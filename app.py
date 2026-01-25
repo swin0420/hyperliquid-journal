@@ -549,5 +549,109 @@ def test_discord_webhook():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/signals/debug", methods=["GET"])
+def debug_sentiment():
+    """Debug endpoint to see raw news fetching and analysis pipeline."""
+    analyze_sample = request.args.get("analyze", "false").lower() == "true"
+
+    try:
+        from sentiment import NewsAggregator, SentimentAnalyzer
+        from sentiment import get_sentiment_session, SignalRepository, init_sentiment_db
+
+        result = {
+            "cryptopanic_configured": bool(CRYPTOPANIC_API_KEY),
+            "anthropic_configured": bool(ANTHROPIC_API_KEY),
+            "discord_configured": bool(DISCORD_WEBHOOK_URL),
+            "database_configured": bool(DATABASE_URL),
+            "news_sources": [],
+            "total_fetched": 0,
+            "new_items": 0,
+            "already_processed": 0,
+            "sample_analysis": None
+        }
+
+        # Create aggregator and fetch news
+        aggregator = NewsAggregator(
+            cryptopanic_api_key=CRYPTOPANIC_API_KEY,
+            filter_by_assets=True
+        )
+
+        # Fetch from each source
+        all_items = []
+
+        # CryptoPanic
+        try:
+            cp_items = aggregator.fetch_cryptopanic(limit=10)
+            result["news_sources"].append({
+                "source": "cryptopanic",
+                "status": "ok",
+                "count": len(cp_items),
+                "items": [{"id": i.id, "title": i.title[:80], "assets": i.currencies, "published": i.published_at.isoformat()} for i in cp_items[:5]]
+            })
+            all_items.extend(cp_items)
+        except Exception as e:
+            result["news_sources"].append({
+                "source": "cryptopanic",
+                "status": "error",
+                "error": str(e)
+            })
+
+        # CryptoCompare
+        try:
+            cc_items = aggregator.fetch_cryptonews(limit=10)
+            result["news_sources"].append({
+                "source": "cryptocompare",
+                "status": "ok",
+                "count": len(cc_items),
+                "items": [{"id": i.id, "title": i.title[:80], "assets": i.currencies, "published": i.published_at.isoformat()} for i in cc_items[:5]]
+            })
+            all_items.extend(cc_items)
+        except Exception as e:
+            result["news_sources"].append({
+                "source": "cryptocompare",
+                "status": "error",
+                "error": str(e)
+            })
+
+        result["total_fetched"] = len(all_items)
+
+        # Check which items are new (not in DB)
+        if DATABASE_URL and init_sentiment_db(DATABASE_URL):
+            session = get_sentiment_session()
+            if session:
+                try:
+                    repo = SignalRepository(session)
+                    new_items = [item for item in all_items if not repo.news_exists(item.id)]
+                    result["new_items"] = len(new_items)
+                    result["already_processed"] = len(all_items) - len(new_items)
+
+                    # Sample analysis if requested and there are new items
+                    if analyze_sample and new_items and ANTHROPIC_API_KEY:
+                        analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
+                        sample = new_items[0]
+                        analysis = analyzer.analyze_single(sample)
+                        if analysis:
+                            result["sample_analysis"] = {
+                                "news_id": analysis.news_id,
+                                "title": analysis.title,
+                                "sentiment": analysis.sentiment.value,
+                                "confidence": analysis.confidence,
+                                "signal_strength": analysis.signal_strength.value,
+                                "is_actionable": analysis.is_actionable,
+                                "assets": analysis.assets,
+                                "reasoning": analysis.reasoning,
+                                "price_impact": analysis.price_impact,
+                                "timeframe": analysis.timeframe
+                            }
+                finally:
+                    session.close()
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.exception("Debug endpoint error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
