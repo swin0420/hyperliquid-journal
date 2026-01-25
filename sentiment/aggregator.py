@@ -120,7 +120,9 @@ class NewsAggregator:
     def __init__(
         self,
         cryptopanic_api_key: Optional[str] = None,
-        filter_by_assets: bool = True
+        filter_by_assets: bool = True,
+        twitter_enabled: bool = True,
+        twitter_accounts: Optional[list[str]] = None
     ):
         """
         Initialize the news aggregator.
@@ -128,11 +130,26 @@ class NewsAggregator:
         Args:
             cryptopanic_api_key: API key for CryptoPanic (optional)
             filter_by_assets: If True, only return news for Hyperliquid assets
+            twitter_enabled: If True, also fetch from Twitter via Nitter
+            twitter_accounts: List of Twitter usernames to track
         """
         self.cryptopanic_api_key = cryptopanic_api_key
         self.filter_by_assets = filter_by_assets
+        self.twitter_enabled = twitter_enabled
         self._session = _get_http_session()
         self._seen_urls: set[str] = set()
+
+        # Initialize Twitter aggregator if enabled
+        self._twitter_aggregator = None
+        if twitter_enabled:
+            try:
+                from .twitter_aggregator import TwitterAggregator
+                self._twitter_aggregator = TwitterAggregator(
+                    accounts=twitter_accounts,
+                    extract_assets_func=self._extract_assets_from_text
+                )
+            except Exception as e:
+                logger.warning("Failed to initialize Twitter aggregator: %s", e)
 
     def _normalize_asset(self, asset: str) -> Optional[str]:
         """Normalize asset name to ticker symbol."""
@@ -325,6 +342,50 @@ class NewsAggregator:
         logger.info("Fetched %d items from CryptoNews", len(items))
         return items
 
+    def fetch_twitter(self, limit: int = 30) -> list[NewsItem]:
+        """
+        Fetch tweets from tracked Twitter accounts via Nitter RSS.
+
+        Args:
+            limit: Maximum number of tweets to return
+
+        Returns:
+            List of NewsItem objects
+        """
+        if not self._twitter_aggregator:
+            logger.debug("Twitter aggregator not initialized, skipping")
+            return []
+
+        items = []
+        try:
+            tweets = self._twitter_aggregator.fetch_tweets(limit_per_account=limit // 3 + 1)
+
+            for tweet in tweets[:limit]:
+                # Extract assets from tweet text
+                currencies = self._extract_assets_from_text(tweet.text)
+
+                # Skip if no relevant assets and filtering is enabled
+                if self.filter_by_assets and not currencies:
+                    continue
+
+                item = NewsItem(
+                    id=tweet.id,
+                    title=tweet.text[:280],  # Tweet length limit
+                    url=tweet.url,
+                    source=NewsSource.CRYPTONEWS,  # Reuse existing source type
+                    source_name=f"@{tweet.username}",
+                    published_at=tweet.published_at,
+                    currencies=currencies,
+                    raw_sentiment=None
+                )
+                items.append(item)
+
+        except Exception as e:
+            logger.error("Error fetching Twitter: %s", e)
+
+        logger.info("Fetched %d items from Twitter", len(items))
+        return items
+
     def fetch_all(self, limit_per_source: int = 30) -> list[NewsItem]:
         """
         Fetch and aggregate news from all sources.
@@ -340,6 +401,7 @@ class NewsAggregator:
         # Fetch from all sources
         all_items.extend(self.fetch_cryptopanic(limit=limit_per_source))
         all_items.extend(self.fetch_cryptonews(limit=limit_per_source))
+        all_items.extend(self.fetch_twitter(limit=limit_per_source))
 
         # Deduplicate by URL hash
         seen_ids: set[str] = set()

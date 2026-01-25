@@ -1,6 +1,7 @@
 """Sentiment analysis module for crypto news alerts."""
 
 from .aggregator import NewsAggregator, NewsItem, NewsSource
+from .twitter_aggregator import TwitterAggregator, TweetItem
 from .analyzer import (
     SentimentAnalyzer,
     SentimentResult,
@@ -30,6 +31,9 @@ __all__ = [
     "NewsAggregator",
     "NewsItem",
     "NewsSource",
+    # Twitter
+    "TwitterAggregator",
+    "TweetItem",
     # Analyzer
     "SentimentAnalyzer",
     "SentimentResult",

@@ -17,7 +17,9 @@ from config import (
     DISCORD_WEBHOOK_URL,
     CRYPTOPANIC_API_KEY,
     SENTIMENT_POLL_INTERVAL,
-    SENTIMENT_BOT_NAME
+    SENTIMENT_BOT_NAME,
+    TWITTER_ENABLED,
+    TWITTER_ACCOUNTS
 )
 
 # Configure logging
@@ -62,11 +64,13 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
                 anthropic_api_key=ANTHROPIC_API_KEY,
                 discord_webhook_url=DISCORD_WEBHOOK_URL,
                 cryptopanic_api_key=CRYPTOPANIC_API_KEY,
-                poll_interval=SENTIMENT_POLL_INTERVAL
+                poll_interval=SENTIMENT_POLL_INTERVAL,
+                twitter_enabled=TWITTER_ENABLED,
+                twitter_accounts=TWITTER_ACCOUNTS
             )
             bot.start(send_startup_message=False)  # Don't spam Discord on every deploy
             atexit.register(destroy_sentiment_bot)
-            logger.info("Sentiment bot auto-started successfully")
+            logger.info("Sentiment bot auto-started successfully (Twitter: %s)", "enabled" if TWITTER_ENABLED else "disabled")
         except Exception as e:
             logger.warning("Failed to auto-start sentiment bot: %s", e)
     else:
@@ -583,6 +587,8 @@ def debug_sentiment():
             "anthropic_configured": bool(ANTHROPIC_API_KEY),
             "discord_configured": bool(DISCORD_WEBHOOK_URL),
             "database_configured": bool(DATABASE_URL),
+            "twitter_enabled": TWITTER_ENABLED,
+            "twitter_accounts": TWITTER_ACCOUNTS if TWITTER_ENABLED else [],
             "news_sources": [],
             "total_fetched": 0,
             "new_items": 0,
@@ -646,7 +652,9 @@ def debug_sentiment():
         # Create aggregator and fetch news
         aggregator = NewsAggregator(
             cryptopanic_api_key=CRYPTOPANIC_API_KEY,
-            filter_by_assets=True
+            filter_by_assets=True,
+            twitter_enabled=TWITTER_ENABLED,
+            twitter_accounts=TWITTER_ACCOUNTS
         )
 
         # Fetch from each source
@@ -685,6 +693,25 @@ def debug_sentiment():
                 "status": "error",
                 "error": str(e)
             })
+
+        # Twitter (via Nitter RSS)
+        if TWITTER_ENABLED:
+            try:
+                tw_items = aggregator.fetch_twitter(limit=10)
+                result["news_sources"].append({
+                    "source": "twitter",
+                    "status": "ok",
+                    "count": len(tw_items),
+                    "accounts": TWITTER_ACCOUNTS,
+                    "items": [{"id": i.id, "title": i.title[:80], "assets": i.currencies, "published": i.published_at.isoformat(), "source_name": i.source_name} for i in tw_items[:5]]
+                })
+                all_items.extend(tw_items)
+            except Exception as e:
+                result["news_sources"].append({
+                    "source": "twitter",
+                    "status": "error",
+                    "error": str(e)
+                })
 
         result["total_fetched"] = len(all_items)
 

@@ -49,7 +49,9 @@ class SentimentBot:
         discord_webhook_url: str,
         cryptopanic_api_key: Optional[str] = None,
         poll_interval: int = DEFAULT_POLL_INTERVAL,
-        bot_name: str = "Sentiment Bot"
+        bot_name: str = "Sentiment Bot",
+        twitter_enabled: bool = True,
+        twitter_accounts: Optional[list[str]] = None
     ):
         """
         Initialize the sentiment bot.
@@ -61,6 +63,8 @@ class SentimentBot:
             cryptopanic_api_key: Optional CryptoPanic API key
             poll_interval: Seconds between polls (default 300)
             bot_name: Display name for Discord messages
+            twitter_enabled: Enable Twitter tracking via Nitter RSS
+            twitter_accounts: List of Twitter usernames to track
         """
         # Validate required params
         if not database_url:
@@ -79,7 +83,9 @@ class SentimentBot:
 
         self.aggregator = NewsAggregator(
             cryptopanic_api_key=cryptopanic_api_key,
-            filter_by_assets=True
+            filter_by_assets=True,
+            twitter_enabled=twitter_enabled,
+            twitter_accounts=twitter_accounts
         )
 
         self.analyzer = SentimentAnalyzer(api_key=anthropic_api_key)
@@ -396,7 +402,9 @@ def create_sentiment_bot(
     anthropic_api_key: str,
     discord_webhook_url: str,
     cryptopanic_api_key: Optional[str] = None,
-    poll_interval: int = DEFAULT_POLL_INTERVAL
+    poll_interval: int = DEFAULT_POLL_INTERVAL,
+    twitter_enabled: bool = True,
+    twitter_accounts: Optional[list[str]] = None
 ) -> SentimentBot:
     """
     Create and store the global bot instance.
@@ -407,6 +415,8 @@ def create_sentiment_bot(
         discord_webhook_url: Discord webhook URL
         cryptopanic_api_key: Optional CryptoPanic API key
         poll_interval: Seconds between polls
+        twitter_enabled: Enable Twitter tracking via Nitter RSS
+        twitter_accounts: List of Twitter usernames to track
 
     Returns:
         SentimentBot instance
@@ -423,7 +433,9 @@ def create_sentiment_bot(
             anthropic_api_key=anthropic_api_key,
             discord_webhook_url=discord_webhook_url,
             cryptopanic_api_key=cryptopanic_api_key,
-            poll_interval=poll_interval
+            poll_interval=poll_interval,
+            twitter_enabled=twitter_enabled,
+            twitter_accounts=twitter_accounts
         )
 
         return _bot_instance

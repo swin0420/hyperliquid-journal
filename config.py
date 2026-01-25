@@ -34,3 +34,12 @@ SENTIMENT_POLL_INTERVAL = int(os.getenv("SENTIMENT_POLL_INTERVAL", "300"))
 
 # Sentiment bot display name
 SENTIMENT_BOT_NAME = os.getenv("SENTIMENT_BOT_NAME", "HL Sentiment Bot")
+
+# Twitter/X tracking via Nitter RSS
+TWITTER_ENABLED = os.getenv("TWITTER_ENABLED", "true").lower() == "true"
+# Comma-separated list of Twitter usernames to track
+TWITTER_ACCOUNTS = [
+    acct.strip() for acct in
+    os.getenv("TWITTER_ACCOUNTS", "cryptounfolded,zoomerfied,WatcherGuru").split(",")
+    if acct.strip()
+]
