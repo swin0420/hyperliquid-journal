@@ -594,18 +594,32 @@ def debug_sentiment():
 
             # Test CryptoPanic
             if CRYPTOPANIC_API_KEY:
-                cp_resp = requests.get(
-                    "https://cryptopanic.com/api/v1/posts/",
-                    params={"auth_token": CRYPTOPANIC_API_KEY, "kind": "news", "public": "true"},
-                    headers=headers,
-                    timeout=10
-                )
-                cp_data = cp_resp.json()
-                result["raw_api_test"]["cryptopanic"] = {
-                    "status_code": cp_resp.status_code,
-                    "total_items": len(cp_data.get("results", [])),
-                    "sample_title": cp_data.get("results", [{}])[0].get("title", "N/A")[:80] if cp_data.get("results") else None
-                }
+                try:
+                    cp_resp = requests.get(
+                        "https://cryptopanic.com/api/v1/posts/",
+                        params={"auth_token": CRYPTOPANIC_API_KEY, "kind": "news", "public": "true"},
+                        headers=headers,
+                        timeout=10
+                    )
+                    # Check if response is JSON or HTML
+                    content_type = cp_resp.headers.get("Content-Type", "")
+                    if "application/json" in content_type:
+                        cp_data = cp_resp.json()
+                        result["raw_api_test"]["cryptopanic"] = {
+                            "status_code": cp_resp.status_code,
+                            "total_items": len(cp_data.get("results", [])),
+                            "sample_title": cp_data.get("results", [{}])[0].get("title", "N/A")[:80] if cp_data.get("results") else None
+                        }
+                    else:
+                        # API returned HTML - likely invalid key
+                        result["raw_api_test"]["cryptopanic"] = {
+                            "status_code": cp_resp.status_code,
+                            "error": "API returned HTML instead of JSON - check if API key is valid",
+                            "content_type": content_type,
+                            "response_preview": cp_resp.text[:200]
+                        }
+                except Exception as cp_err:
+                    result["raw_api_test"]["cryptopanic"] = {"error": str(cp_err)}
         except Exception as e:
             result["raw_api_test"] = {"error": str(e)}
 
