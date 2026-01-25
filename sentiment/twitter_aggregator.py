@@ -26,11 +26,18 @@ MAX_RETRIES = 2
 RETRY_BACKOFF = 0.5
 
 # Nitter instances (multiple for fallback - they go down often)
+# Note: Nitter instances are notoriously unstable as Twitter/X blocks them
 NITTER_INSTANCES = [
     "nitter.poast.org",
     "nitter.privacydev.net",
-    "nitter.woodland.cafe",
     "nitter.net",
+    "nitter.cz",
+    "nitter.unixfox.eu",
+    "nitter.1d4.us",
+    "nitter.kavin.rocks",
+    "nitter.it",
+    "nitter.domain.glass",
+    "nitter.moomoo.me",
 ]
 
 # Default accounts to track
