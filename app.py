@@ -696,16 +696,52 @@ def debug_sentiment():
                             }
 
                             if claude_resp.status_code == 200:
-                                analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
-                                # Get raw response first
-                                raw_response = analyzer._call_claude(f"""Analyze this crypto news headline:
+                                # Make direct API call with full sentiment prompt
+                                sentiment_prompt = f"""Analyze this crypto news headline:
 Title: {sample.title}
 Source: {sample.source_name}
 Assets mentioned: {', '.join(sample.currencies) if sample.currencies else 'None specified'}
 
-Return JSON with: sentiment, confidence, signal_strength, price_impact, timeframe, reasoning""")
-                                result["raw_claude_response"] = raw_response[:500] if raw_response else "None returned"
-                                analysis = analyzer._parse_sentiment_response(raw_response, sample) if raw_response else None
+Return JSON with: sentiment, confidence, signal_strength, price_impact, timeframe, reasoning"""
+
+                                try:
+                                    direct_resp = req.post(
+                                        "https://api.anthropic.com/v1/messages",
+                                        headers={
+                                            "Content-Type": "application/json",
+                                            "x-api-key": ANTHROPIC_API_KEY,
+                                            "anthropic-version": "2023-06-01"
+                                        },
+                                        json={
+                                            "model": "claude-3-haiku-20240307",
+                                            "max_tokens": 1024,
+                                            "system": "You are a crypto sentiment analyzer. Return valid JSON only.",
+                                            "messages": [{"role": "user", "content": sentiment_prompt}]
+                                        },
+                                        timeout=30
+                                    )
+                                    result["direct_sentiment_call"] = {
+                                        "status": direct_resp.status_code,
+                                        "response": direct_resp.text[:800]
+                                    }
+
+                                    if direct_resp.status_code == 200:
+                                        data = direct_resp.json()
+                                        content = data.get("content", [])
+                                        if content and content[0].get("type") == "text":
+                                            raw_response = content[0].get("text", "")
+                                            result["raw_claude_response"] = raw_response[:500]
+
+                                            # Try parsing
+                                            analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
+                                            analysis = analyzer._parse_sentiment_response(raw_response, sample)
+                                        else:
+                                            analysis = None
+                                    else:
+                                        analysis = None
+                                except Exception as direct_err:
+                                    result["direct_call_error"] = str(direct_err)
+                                    analysis = None
                             else:
                                 analysis = None
                         except Exception as analysis_error:
