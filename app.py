@@ -697,7 +697,15 @@ def debug_sentiment():
 
                             if claude_resp.status_code == 200:
                                 analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
-                                analysis = analyzer.analyze_single(sample)
+                                # Get raw response first
+                                raw_response = analyzer._call_claude(f"""Analyze this crypto news headline:
+Title: {sample.title}
+Source: {sample.source_name}
+Assets mentioned: {', '.join(sample.currencies) if sample.currencies else 'None specified'}
+
+Return JSON with: sentiment, confidence, signal_strength, price_impact, timeframe, reasoning""")
+                                result["raw_claude_response"] = raw_response[:500] if raw_response else "None returned"
+                                analysis = analyzer._parse_sentiment_response(raw_response, sample) if raw_response else None
                             else:
                                 analysis = None
                         except Exception as analysis_error:
