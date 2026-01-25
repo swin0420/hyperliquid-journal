@@ -217,24 +217,38 @@ Return valid JSON only, no markdown."""
 
             data = json.loads(response)
 
-            # Map string values to enums
+            # Map string values to enums (handle variations Claude might return)
             sentiment_map = {
                 "very_bullish": SentimentScore.VERY_BULLISH,
                 "bullish": SentimentScore.BULLISH,
+                "positive": SentimentScore.BULLISH,  # alias
                 "neutral": SentimentScore.NEUTRAL,
+                "mixed": SentimentScore.NEUTRAL,  # alias
                 "bearish": SentimentScore.BEARISH,
+                "negative": SentimentScore.BEARISH,  # alias
                 "very_bearish": SentimentScore.VERY_BEARISH
             }
 
             strength_map = {
                 "strong": SignalStrength.STRONG,
+                "high": SignalStrength.STRONG,  # alias
+                "4": SignalStrength.STRONG,
+                "5": SignalStrength.STRONG,
                 "moderate": SignalStrength.MODERATE,
+                "medium": SignalStrength.MODERATE,  # alias
+                "3": SignalStrength.MODERATE,
                 "weak": SignalStrength.WEAK,
-                "none": SignalStrength.NONE
+                "low": SignalStrength.WEAK,  # alias
+                "1": SignalStrength.WEAK,
+                "2": SignalStrength.WEAK,
+                "none": SignalStrength.NONE,
+                "0": SignalStrength.NONE
             }
 
-            sentiment = sentiment_map.get(data.get("sentiment", "neutral"), SentimentScore.NEUTRAL)
-            signal_strength = strength_map.get(data.get("signal_strength", "none"), SignalStrength.NONE)
+            raw_sentiment = str(data.get("sentiment", "neutral")).lower()
+            raw_strength = str(data.get("signal_strength", "none")).lower()
+            sentiment = sentiment_map.get(raw_sentiment, SentimentScore.NEUTRAL)
+            signal_strength = strength_map.get(raw_strength, SignalStrength.NONE)
 
             return SentimentResult(
                 news_id=news_item.id,
