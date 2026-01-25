@@ -6,12 +6,13 @@ A multi-user trading journal web app for tracking Hyperliquid perpetual futures 
 **Live Site**: https://hl-journal.xyz
 
 ## Tech Stack
-- **Backend**: Python Flask, SQLAlchemy
-- **Database**: PostgreSQL (Railway)
+- **Backend**: Python Flask, SQLAlchemy, APScheduler
+- **Server**: Gunicorn (1 worker, 2 threads)
+- **Database**: PostgreSQL (Railway) with connection pooling
 - **Frontend**: Vanilla JS, HTML, CSS, Chart.js
 - **Styling**: Aurora/Northern Lights animated background, glassmorphism cards
 - **Fonts**: Inter (UI), JetBrains Mono (numbers)
-- **Deployment**: Railway (from GitHub)
+- **Deployment**: Railway (auto-deploy from GitHub)
 
 ## Project Structure
 ```
@@ -49,6 +50,7 @@ trade-journal/
 All endpoints require wallet address (query param, body, or header). Wallet must be valid Ethereum format (0x + 40 hex chars).
 
 - `GET /` - Main journal page
+- `GET /health` - Health check endpoint (for Railway monitoring)
 - `GET /api/init?wallet=0x...` - Get roundtrips + assets (combined, faster)
 - `GET /api/trades?wallet=0x...` - Get all trades
 - `POST /api/trades/sync` - Sync trades from Hyperliquid
@@ -100,6 +102,15 @@ python app.py
 - **SSL**: Let's Encrypt (auto-issued by Railway)
 - **Database**: Railway PostgreSQL
 - **Repository**: https://github.com/swin0420/hyperliquid-journal
+
+## Gunicorn Configuration
+```
+web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --keep-alive 5
+```
+- **workers 1**: Single worker prevents APScheduler conflicts (multiple schedulers)
+- **threads 2**: Allow concurrent request handling within single worker
+- **timeout 120**: Long timeout for slow Hyperliquid API calls
+- **keep-alive 5**: Connection reuse for better mobile performance
 
 ## Environment Variables
 - `DATABASE_URL` - PostgreSQL connection string (required for production)
@@ -263,3 +274,4 @@ print(scheduler.get_jobs())  # List all scheduled jobs
 - Date filters have From/To labels for clarity
 - Manual "Sync" button always syncs (bypasses cooldown)
 - Code reviewed Jan 2026: clean structure, proper error handling, no security issues
+- Jan 2026: Fixed mobile unresponsiveness (APScheduler + Gunicorn conflict, added health checks)
