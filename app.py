@@ -625,10 +625,14 @@ def debug_sentiment():
                     result["new_items"] = len(new_items)
                     result["already_processed"] = len(all_items) - len(new_items)
 
-                    # Sample analysis if requested and there are new items
-                    if analyze_sample and new_items and ANTHROPIC_API_KEY:
+                    # Sample analysis if requested
+                    # Use force=true to analyze even already-processed items
+                    force_analyze = request.args.get("force", "false").lower() == "true"
+                    items_to_analyze = new_items if new_items else (all_items if force_analyze else [])
+
+                    if analyze_sample and items_to_analyze and ANTHROPIC_API_KEY:
                         analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
-                        sample = new_items[0]
+                        sample = items_to_analyze[0]
                         analysis = analyzer.analyze_single(sample)
                         if analysis:
                             result["sample_analysis"] = {
@@ -643,6 +647,7 @@ def debug_sentiment():
                                 "price_impact": analysis.price_impact,
                                 "timeframe": analysis.timeframe
                             }
+                        result["analyzed_from"] = "new" if new_items else "existing (forced)"
                 finally:
                     session.close()
 
