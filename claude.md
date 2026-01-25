@@ -18,13 +18,20 @@ A multi-user trading journal web app for tracking Hyperliquid perpetual futures 
 ```
 trade-journal/
 ├── app.py              # Flask routes and API endpoints
-├── config.py           # Configuration (DATABASE_URL)
+├── config.py           # Configuration (DATABASE_URL, API keys)
 ├── constants.py        # Enums and constants (Direction, Action, MarketType, etc.)
 ├── hyperliquid.py      # Hyperliquid API integration with retries
 ├── scheduler.py        # Background sync with APScheduler
 ├── storage.py          # PostgreSQL storage with SQLAlchemy + connection pooling
 ├── requirements.txt    # Python dependencies
 ├── Procfile            # Railway deployment config
+├── sentiment/          # Sentiment analysis bot module
+│   ├── __init__.py     # Module exports
+│   ├── aggregator.py   # News fetching (CryptoPanic, CryptoCompare)
+│   ├── analyzer.py     # Claude Haiku sentiment analysis
+│   ├── discord_bot.py  # Discord webhook alerts
+│   ├── models.py       # SQLAlchemy models for signals
+│   └── signal_scheduler.py  # Bot orchestrator
 ├── templates/
 │   └── index.html      # Main page template
 └── static/
@@ -62,6 +69,16 @@ All endpoints require wallet address (query param, body, or header). Wallet must
 - `POST /api/sync/enable` - Enable background sync for wallet (body: wallet_address, interval_minutes)
 - `POST /api/sync/disable` - Disable background sync for wallet
 - `GET /api/sync/status?wallet=0x...` - Check if background sync is enabled
+
+### Sentiment Bot Endpoints
+- `GET /api/signals` - Get signal history (query: limit, sentiment, asset, actionable)
+- `GET /api/signals/stats` - Get signal statistics (query: hours)
+- `POST /api/signals/enable` - Start sentiment bot (body: poll_interval)
+- `POST /api/signals/disable` - Stop sentiment bot
+- `GET /api/signals/status` - Get bot status and stats
+- `POST /api/signals/poll` - Trigger immediate poll
+- `POST /api/signals/test` - Send test alert to Discord
+- `POST /api/signals/webhook/test` - Test Discord webhook connection
 
 ## UI Features
 - Aurora animated background (purple, pink, green, cyan gradients)
@@ -114,6 +131,11 @@ web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120
 
 ## Environment Variables
 - `DATABASE_URL` - PostgreSQL connection string (required for production)
+- `ANTHROPIC_API_KEY` - Anthropic API key for Claude sentiment analysis
+- `DISCORD_WEBHOOK_URL` - Discord webhook URL for alerts
+- `CRYPTOPANIC_API_KEY` - CryptoPanic API key (optional, for additional news source)
+- `SENTIMENT_POLL_INTERVAL` - Polling interval in seconds (default: 300 = 5 minutes)
+- `SENTIMENT_BOT_NAME` - Bot display name for Discord (default: "HL Sentiment Bot")
 
 ## Performance Optimizations
 - **Parallel API calls**: Hyperliquid API calls (clearinghouseState, allMids, openOrders) run concurrently
@@ -260,12 +282,121 @@ scheduler = get_scheduler()
 print(scheduler.get_jobs())  # List all scheduled jobs
 ```
 
+## Sentiment Bot Architecture
+
+### Overview
+The sentiment bot monitors crypto news and sends Discord alerts for potentially market-moving events. It uses Claude Haiku for AI-powered sentiment analysis.
+
+### Architecture Flow
+```
+EVERY 5 MINUTES (configurable):
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. NEWS AGGREGATOR                                              │
+│    ├── Fetch from CryptoPanic API                               │
+│    ├── Fetch from CryptoCompare News API                        │
+│    ├── Deduplicate by URL hash                                  │
+│    └── Filter by Hyperliquid-listed assets (50+ coins)          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. CLAUDE HAIKU SENTIMENT ANALYSIS                              │
+│    ├── Analyze each headline for market sentiment               │
+│    ├── Returns: sentiment, confidence, reasoning, assets        │
+│    └── Sentiment scale: very_bullish → bullish → neutral →      │
+│                         bearish → very_bearish                  │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. FILTER ACTIONABLE SIGNALS                                    │
+│    ├── Confidence >= 60%                                        │
+│    ├── Non-neutral sentiment                                    │
+│    └── Strong or moderate signal strength                       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. SAVE TO DATABASE                                             │
+│    ├── sentiment_news table (news items)                        │
+│    └── sentiment_signals table (analysis results)               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. DISCORD ALERT                                                │
+│    ├── Color-coded embed (green=bullish, red=bearish)           │
+│    ├── Shows: sentiment, confidence, assets, reasoning          │
+│    └── Rate limited (2s between messages)                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why Claude/Anthropic?
+Claude Haiku analyzes news headlines to determine:
+- **Sentiment**: Is this news bullish or bearish for the asset?
+- **Confidence**: How certain is the analysis (0-100%)?
+- **Reasoning**: Why does this news matter for price?
+- **Assets**: Which cryptocurrencies are affected?
+- **Timeframe**: Immediate, short-term, or long-term impact?
+
+This enables intelligent filtering - only news likely to move markets triggers alerts.
+
+### Database Schema (Sentiment)
+```sql
+sentiment_news (
+    id VARCHAR(16) PRIMARY KEY,  -- URL hash
+    title TEXT,
+    url TEXT,
+    source VARCHAR(50),          -- cryptopanic, cryptonews
+    published_at TIMESTAMP,
+    currencies TEXT,             -- JSON array
+    raw_sentiment VARCHAR(20)
+)
+
+sentiment_signals (
+    id SERIAL PRIMARY KEY,
+    news_id VARCHAR(16) REFERENCES sentiment_news(id),
+    sentiment VARCHAR(20),       -- very_bullish, bullish, neutral, etc.
+    confidence FLOAT,
+    signal_strength VARCHAR(20), -- strong, moderate, weak, none
+    price_impact VARCHAR(20),    -- up, down, neutral
+    timeframe VARCHAR(20),       -- immediate, short_term, long_term
+    reasoning TEXT,
+    assets TEXT,                 -- JSON array
+    is_actionable BOOLEAN,
+    alert_sent BOOLEAN,
+    alert_sent_at TIMESTAMP
+)
+```
+
+### Alert Example (Discord)
+```
+📈 BULLISH Signal - BTC, ETH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Headline: "Major bank announces Bitcoin custody service"
+
+Confidence: 78%
+Signal: MODERATE
+Impact: Price likely to move UP
+Timeframe: short_term
+
+Reasoning: Institutional adoption signals increase mainstream
+acceptance and potential capital inflows.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### No Alerts?
+The bot only sends alerts for NEW, ACTIONABLE signals:
+- News must not already be in database
+- Confidence must be ≥60%
+- Sentiment must be non-neutral
+- Signal strength must be strong or moderate
+
+If no qualifying news is found, no alerts are sent (this is expected).
+
 ## Future Improvements
 - [ ] Rate limiting on API endpoints
 - [ ] WebSocket for real-time position updates
 - [ ] Trade analytics dashboard (Sharpe ratio, drawdown)
 - [ ] Export trades to CSV
-- [ ] Telegram/Discord notifications for large P&L
+- [x] ~~Telegram/Discord notifications for large P&L~~ → Sentiment bot added
 
 ## Notes
 - Wallet address saved to browser localStorage for convenience
