@@ -27,7 +27,8 @@ trade-journal/
 ├── Procfile            # Railway deployment config
 ├── sentiment/          # Sentiment analysis bot module
 │   ├── __init__.py     # Module exports
-│   ├── aggregator.py   # News fetching (CryptoPanic, CryptoCompare)
+│   ├── aggregator.py   # News fetching (CryptoPanic, CryptoCompare, Twitter)
+│   ├── twitter_aggregator.py  # Twitter/X via Nitter RSS
 │   ├── analyzer.py     # Claude Haiku sentiment analysis
 │   ├── discord_bot.py  # Discord webhook alerts
 │   ├── models.py       # SQLAlchemy models for signals
@@ -136,6 +137,8 @@ web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120
 - `CRYPTOPANIC_API_KEY` - CryptoPanic API key (optional, for additional news source)
 - `SENTIMENT_POLL_INTERVAL` - Polling interval in seconds (default: 300 = 5 minutes)
 - `SENTIMENT_BOT_NAME` - Bot display name for Discord (default: "HL Sentiment Bot")
+- `TWITTER_ENABLED` - Enable Twitter tracking via Nitter RSS (default: true)
+- `TWITTER_ACCOUNTS` - Comma-separated Twitter usernames to track (default: "cryptounfolded,zoomerfied,WatcherGuru")
 
 ## Performance Optimizations
 - **Parallel API calls**: Hyperliquid API calls (clearinghouseState, allMids, openOrders) run concurrently
@@ -324,6 +327,7 @@ EVERY 5 MINUTES (configurable):
 │ 1. NEWS AGGREGATOR                                              │
 │    ├── Fetch from CryptoPanic API                               │
 │    ├── Fetch from CryptoCompare News API                        │
+│    ├── Fetch from Twitter/X via Nitter RSS (crypto influencers) │
 │    ├── Deduplicate by URL hash                                  │
 │    └── Filter by Hyperliquid-listed assets (50+ coins)          │
 └─────────────────────────────────────────────────────────────────┘
@@ -419,6 +423,41 @@ The bot only sends alerts for NEW, ACTIONABLE signals:
 - Signal strength must be strong or moderate
 
 If no qualifying news is found, no alerts are sent (this is expected).
+
+### Twitter/X Tracking
+The bot tracks crypto influencer tweets via Nitter RSS feeds (no Twitter API needed).
+
+**Default accounts tracked:**
+- @cryptounfolded
+- @zoomerfied
+- @WatcherGuru
+
+**How it works:**
+- Uses Nitter instances (Twitter frontend mirrors) that provide RSS feeds
+- Multiple instance fallback (Nitter instances are notoriously unstable)
+- Extracts asset mentions from tweet text
+- Normalizes to NewsItem format for Claude analysis
+
+**Nitter instances used (with fallback):**
+- nitter.poast.org
+- nitter.privacydev.net
+- nitter.net
+- nitter.cz
+- nitter.unixfox.eu
+- And more...
+
+**Known limitation:** Twitter/X actively blocks Nitter instances, so Twitter data may not always be available. CryptoCompare remains the primary reliable source.
+
+**To customize accounts:**
+```bash
+# In Railway environment variables
+TWITTER_ACCOUNTS=cryptounfolded,zoomerfied,WatcherGuru,whale_alert,CryptoKaleo
+```
+
+**To disable Twitter (if causing issues):**
+```bash
+TWITTER_ENABLED=false
+```
 
 ## Future Improvements
 - [ ] Rate limiting on API endpoints
