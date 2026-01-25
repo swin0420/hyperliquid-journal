@@ -1,30 +1,59 @@
 import requests
+from functools import lru_cache
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import HYPERLIQUID_API_URL
+from constants import (
+    Direction, Action, MarketType, ApiType, FillSide,
+    API_DIRECTION_LONG, API_DIRECTION_OPEN, SPOT_ASSET_PREFIX
+)
 
-# Cache for spot metadata
-_spot_name_cache = {}
+# Request configuration
+REQUEST_TIMEOUT = 15  # seconds
+MAX_RETRIES = 3
+RETRY_BACKOFF = 0.5  # exponential backoff factor
+
+# Create a session with retry logic
+def _get_http_session() -> requests.Session:
+    """Create a requests session with retry and timeout configuration."""
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=MAX_RETRIES,
+        backoff_factor=RETRY_BACKOFF,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["POST", "GET"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
+def _api_request(payload: dict) -> dict | list:
+    """Make an API request with timeout and retry handling."""
+    session = _get_http_session()
+    response = session.post(
+        HYPERLIQUID_API_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+        timeout=REQUEST_TIMEOUT
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+@lru_cache(maxsize=1)
 def fetch_spot_meta() -> dict:
     """
     Fetch spot metadata to get token names for spot indices.
+    Results are cached using lru_cache for thread-safety.
 
     Returns:
         Dict mapping spot index (e.g., "107") to token name (e.g., "HYPE/USDC")
     """
-    global _spot_name_cache
-    if _spot_name_cache:
-        return _spot_name_cache
-
-    payload = {"type": "spotMeta"}
-    response = requests.post(
-        HYPERLIQUID_API_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    data = response.json()
+    data = _api_request({"type": ApiType.SPOT_META})
+    spot_name_map = {}
 
     # Build mapping from spot index to name
     # Universe contains spot pairs with their names
@@ -34,7 +63,7 @@ def fetch_spot_meta() -> dict:
         name = spot.get("name", "")
         if index is not None:
             # If name starts with @, try to build from tokens
-            if name.startswith("@") or not name:
+            if name.startswith(SPOT_ASSET_PREFIX) or not name:
                 tokens = spot.get("tokens", [])
                 # tokens[0] is base, tokens[1] is quote (usually USDC = 0)
                 # We need token metadata to resolve names
@@ -51,9 +80,9 @@ def fetch_spot_meta() -> dict:
                             quote_name = t.get("name")
                     if base_name:
                         name = f"{base_name}/USDC" if quote_idx == 0 else f"{base_name}/{quote_name or '?'}"
-            _spot_name_cache[str(index)] = name
+            spot_name_map[str(index)] = name
 
-    return _spot_name_cache
+    return spot_name_map
 
 
 def get_spot_name(asset: str) -> str:
@@ -66,7 +95,7 @@ def get_spot_name(asset: str) -> str:
     Returns:
         Readable name
     """
-    if not asset.startswith("@"):
+    if not asset.startswith(SPOT_ASSET_PREFIX):
         return asset
 
     spot_index = asset[1:]  # Remove @ prefix
@@ -85,19 +114,11 @@ def fetch_user_fills(wallet_address: str, aggregate_by_time: bool = True) -> lis
     Returns:
         List of fill objects with trade details
     """
-    payload = {
-        "type": "userFills",
+    return _api_request({
+        "type": ApiType.USER_FILLS,
         "user": wallet_address,
         "aggregateByTime": aggregate_by_time
-    }
-
-    response = requests.post(
-        HYPERLIQUID_API_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    return response.json()
+    })
 
 
 def parse_fill_to_trade(fill: dict) -> dict:
@@ -111,25 +132,25 @@ def parse_fill_to_trade(fill: dict) -> dict:
         Normalized trade object for our journal
     """
     asset = fill.get("coin", "")
-    is_spot = asset.startswith("@")
+    is_spot = asset.startswith(SPOT_ASSET_PREFIX)
     side = fill.get("side", "")  # B = buy, A = sell
 
     if is_spot:
         # Spot trading: Buy = open long, Sell = close long
         # Spot doesn't have shorting
         is_long = True
-        is_open = side == "B"  # Buy is open, Sell is close
+        is_open = side == FillSide.BUY
     else:
         # Perp trading: Use the dir field
         direction = fill.get("dir", "")
-        is_long = "Long" in direction
-        is_open = "Open" in direction
+        is_long = API_DIRECTION_LONG in direction
+        is_open = API_DIRECTION_OPEN in direction
 
     return {
         "id": str(fill.get("tid", fill.get("oid", ""))),
         "asset": asset,
-        "direction": "long" if is_long else "short",
-        "action": "open" if is_open else "close",
+        "direction": Direction.LONG if is_long else Direction.SHORT,
+        "action": Action.OPEN if is_open else Action.CLOSE,
         "price": float(fill.get("px", 0)),
         "size": float(fill.get("sz", 0)),
         "pnl": float(fill.get("closedPnl", 0)),
@@ -168,19 +189,11 @@ def fetch_user_funding(wallet_address: str, start_time: int = 0) -> list:
     Returns:
         List of funding payment objects
     """
-    payload = {
-        "type": "userFunding",
+    return _api_request({
+        "type": ApiType.USER_FUNDING,
         "user": wallet_address,
         "startTime": start_time
-    }
-
-    response = requests.post(
-        HYPERLIQUID_API_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    return response.json()
+    })
 
 
 def parse_funding_events(funding_list: list) -> list:
@@ -226,15 +239,7 @@ def fetch_all_mids() -> dict:
     Returns:
         Dict mapping asset name to mid price
     """
-    payload = {"type": "allMids"}
-
-    response = requests.post(
-        HYPERLIQUID_API_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    return response.json()
+    return _api_request({"type": ApiType.ALL_MIDS})
 
 
 def fetch_open_orders(wallet_address: str) -> list:
@@ -247,33 +252,18 @@ def fetch_open_orders(wallet_address: str) -> list:
     Returns:
         List of open orders with trigger prices
     """
-    payload = {
-        "type": "frontendOpenOrders",
+    return _api_request({
+        "type": ApiType.OPEN_ORDERS,
         "user": wallet_address
-    }
-
-    response = requests.post(
-        HYPERLIQUID_API_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    return response.json()
+    })
 
 
 def _fetch_clearinghouse_state(wallet_address: str) -> dict:
     """Fetch clearinghouse state for a wallet."""
-    payload = {
-        "type": "clearinghouseState",
+    return _api_request({
+        "type": ApiType.CLEARINGHOUSE_STATE,
         "user": wallet_address
-    }
-    response = requests.post(
-        HYPERLIQUID_API_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    return response.json()
+    })
 
 
 def fetch_open_positions(wallet_address: str) -> list:
@@ -354,7 +344,7 @@ def fetch_open_positions(wallet_address: str) -> list:
         positions.append({
             "asset": asset,
             "size": abs(size),
-            "direction": "long" if is_long else "short",
+            "direction": Direction.LONG if is_long else Direction.SHORT,
             "entry_price": entry_px,
             "current_price": current_price,
             "unrealized_pnl": unrealized_pnl,

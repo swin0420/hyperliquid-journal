@@ -18,8 +18,10 @@ A multi-user trading journal web app for tracking Hyperliquid perpetual futures 
 trade-journal/
 ├── app.py              # Flask routes and API endpoints
 ├── config.py           # Configuration (DATABASE_URL)
-├── hyperliquid.py      # Hyperliquid API integration
-├── storage.py          # PostgreSQL storage with SQLAlchemy
+├── constants.py        # Enums and constants (Direction, Action, MarketType, etc.)
+├── hyperliquid.py      # Hyperliquid API integration with retries
+├── scheduler.py        # Background sync with APScheduler
+├── storage.py          # PostgreSQL storage with SQLAlchemy + connection pooling
 ├── requirements.txt    # Python dependencies
 ├── Procfile            # Railway deployment config
 ├── templates/
@@ -44,7 +46,7 @@ trade-journal/
 - Supports both perps and spot markets
 
 ## API Endpoints
-All endpoints require wallet address (query param, body, or header).
+All endpoints require wallet address (query param, body, or header). Wallet must be valid Ethereum format (0x + 40 hex chars).
 
 - `GET /` - Main journal page
 - `GET /api/init?wallet=0x...` - Get roundtrips + assets (combined, faster)
@@ -55,6 +57,9 @@ All endpoints require wallet address (query param, body, or header).
 - `GET /api/funding?wallet=0x...` - Get funding history
 - `GET /api/assets?wallet=0x...` - Get unique traded assets
 - `PUT /api/trades/<id>/notes` - Update trade notes
+- `POST /api/sync/enable` - Enable background sync for wallet (body: wallet_address, interval_minutes)
+- `POST /api/sync/disable` - Disable background sync for wallet
+- `GET /api/sync/status?wallet=0x...` - Check if background sync is enabled
 
 ## UI Features
 - Aurora animated background (purple, pink, green, cyan gradients)
@@ -104,6 +109,25 @@ python app.py
 - **Sync cooldown**: Auto-sync skipped if synced within 30 seconds (per-wallet)
 - **Combined endpoint**: `/api/init` returns roundtrips + assets in single request
 - **Image preloading**: Desktop catgirl images preloaded for faster display
+- **Connection pooling**: PostgreSQL QueuePool (5 connections, 10 overflow, pre-ping enabled)
+- **Round-trip caching**: 30-second TTL cache with automatic invalidation on updates
+- **API retries**: 3 retries with exponential backoff (0.5s factor) on 429/5xx errors
+- **Request timeouts**: 15-second timeout on all Hyperliquid API calls
+- **Thread-safe caching**: `lru_cache` for spot metadata
+
+## Code Quality
+- **Wallet validation**: Ethereum address format validation (0x + 40 hex chars)
+- **Error logging**: All exceptions logged with `logger.exception()`
+- **Type hints**: Full type annotations on public functions
+- **Constants**: Enums for Direction, Action, MarketType, ApiType; ErrorMsg class
+- **Session management**: Context manager with auto-rollback and cleanup
+- **Background sync**: APScheduler for periodic trade syncing (configurable interval)
+
+## Database Indexes
+- `idx_wallet_timestamp` - Composite index on (wallet_address, timestamp)
+- `idx_wallet_asset` - Composite index on (wallet_address, asset)
+- Individual index on `wallet_address`
+- Individual index on `asset`
 
 ## Notes
 - Wallet address saved to browser localStorage for convenience

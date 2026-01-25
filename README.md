@@ -15,6 +15,7 @@ Just enter your wallet address and click Sync. Your data is private and stored s
 ## Features
 
 - **Trade Sync** - Automatically fetch trades from Hyperliquid API
+- **Background Sync** - Optional periodic auto-sync with configurable intervals
 - **Portfolio Stats** - P&L, fees, funding, win rate, best streak
 - **Open Positions** - Real-time position tracking with unrealized P&L
 - **P&L Chart** - Cumulative performance visualization
@@ -26,8 +27,8 @@ Just enter your wallet address and click Sync. Your data is private and stored s
 
 | Component | Technology |
 |-----------|------------|
-| Backend | Flask, SQLAlchemy |
-| Database | PostgreSQL |
+| Backend | Flask, SQLAlchemy, APScheduler |
+| Database | PostgreSQL (with connection pooling) |
 | Frontend | Vanilla JS, Chart.js |
 | Styling | CSS3 (Aurora theme) |
 | Fonts | Inter, JetBrains Mono |
