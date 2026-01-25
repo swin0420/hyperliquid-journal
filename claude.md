@@ -219,6 +219,8 @@ logger.info("Operation took %.3fs", time.perf_counter() - start)
 2. **Timeout errors** - Check Hyperliquid API status, increase REQUEST_TIMEOUT
 3. **Empty round-trips** - Verify trades have both "open" and "close" actions
 4. **Cache staleness** - Call `invalidate_round_trip_cache(wallet)` after manual DB changes
+5. **Site unresponsive for ~5 minutes** - Usually Railway cold start or scheduler conflict; fixed with single worker + health check
+6. **Mobile freezing** - Check if too many background syncs registered; disable unused ones
 
 ### Debug Logging
 ```bash

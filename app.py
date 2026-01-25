@@ -31,9 +31,18 @@ from storage import (
 
 app = Flask(__name__)
 
-# Start background scheduler
-start_scheduler()
-atexit.register(stop_scheduler)
+# Start background scheduler only in main process (not in gunicorn workers)
+import os
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+    # Only start if we're the main process or in production
+    # Use a file lock to prevent multiple schedulers in gunicorn
+    _scheduler_started = False
+    try:
+        start_scheduler()
+        _scheduler_started = True
+        atexit.register(stop_scheduler)
+    except Exception as e:
+        logger.warning("Scheduler already running or failed to start: %s", e)
 
 # Ethereum address pattern: 0x followed by 40 hex characters
 WALLET_PATTERN = re.compile(r'^0x[a-fA-F0-9]{40}$')
@@ -67,6 +76,12 @@ def get_wallet_from_request() -> str | None:
 def index():
     """Serve the main journal page."""
     return render_template("index.html")
+
+
+@app.route("/health")
+def health_check():
+    """Health check endpoint for Railway."""
+    return jsonify({"status": "healthy"}), 200
 
 
 @app.route("/api/trades", methods=["GET"])

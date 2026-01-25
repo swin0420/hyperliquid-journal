@@ -2,15 +2,18 @@
 
 import logging
 import threading
+import os
 from typing import Callable
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.executors.pool import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
 # Scheduler instance
 _scheduler: BackgroundScheduler | None = None
 _scheduler_lock = threading.Lock()
+_initialized = False
 
 # Default sync interval in minutes
 DEFAULT_SYNC_INTERVAL = 5
@@ -25,11 +28,16 @@ def get_scheduler() -> BackgroundScheduler:
     global _scheduler
     with _scheduler_lock:
         if _scheduler is None:
+            # Use a small thread pool to prevent resource exhaustion
+            executors = {
+                'default': ThreadPoolExecutor(max_workers=2)
+            }
             _scheduler = BackgroundScheduler(
+                executors=executors,
                 job_defaults={
                     'coalesce': True,  # Combine missed runs into one
                     'max_instances': 1,  # Only one instance of each job at a time
-                    'misfire_grace_time': 60  # Allow 60s grace period for misfires
+                    'misfire_grace_time': 120  # Allow 2min grace period for misfires
                 }
             )
         return _scheduler
@@ -37,10 +45,17 @@ def get_scheduler() -> BackgroundScheduler:
 
 def start_scheduler() -> None:
     """Start the background scheduler if not already running."""
+    global _initialized
+    with _scheduler_lock:
+        if _initialized:
+            logger.debug("Scheduler already initialized, skipping")
+            return
+        _initialized = True
+
     scheduler = get_scheduler()
     if not scheduler.running:
         scheduler.start()
-        logger.info("Background scheduler started")
+        logger.info("Background scheduler started (PID: %s)", os.getpid())
 
 
 def stop_scheduler() -> None:
