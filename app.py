@@ -671,10 +671,35 @@ def debug_sentiment():
 
                     if analyze_sample and items_to_analyze and ANTHROPIC_API_KEY:
                         try:
-                            analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
                             sample = items_to_analyze[0]
                             result["analyzing_item"] = {"id": sample.id, "title": sample.title[:80]}
-                            analysis = analyzer.analyze_single(sample)
+
+                            # Test raw Claude API first
+                            import requests as req
+                            claude_resp = req.post(
+                                "https://api.anthropic.com/v1/messages",
+                                headers={
+                                    "Content-Type": "application/json",
+                                    "x-api-key": ANTHROPIC_API_KEY,
+                                    "anthropic-version": "2023-06-01"
+                                },
+                                json={
+                                    "model": "claude-3-haiku-20240307",
+                                    "max_tokens": 100,
+                                    "messages": [{"role": "user", "content": "Say hello in JSON format: {\"message\": \"...\"}"}]
+                                },
+                                timeout=15
+                            )
+                            result["claude_api_test"] = {
+                                "status_code": claude_resp.status_code,
+                                "response": claude_resp.text[:500] if claude_resp.status_code != 200 else "OK"
+                            }
+
+                            if claude_resp.status_code == 200:
+                                analyzer = SentimentAnalyzer(api_key=ANTHROPIC_API_KEY)
+                                analysis = analyzer.analyze_single(sample)
+                            else:
+                                analysis = None
                         except Exception as analysis_error:
                             result["analysis_error"] = str(analysis_error)
                             analysis = None
