@@ -11,6 +11,14 @@ from scheduler import (
     unregister_wallet,
     is_wallet_registered
 )
+from config import (
+    DATABASE_URL,
+    ANTHROPIC_API_KEY,
+    DISCORD_WEBHOOK_URL,
+    CRYPTOPANIC_API_KEY,
+    SENTIMENT_POLL_INTERVAL,
+    SENTIMENT_BOT_NAME
+)
 
 # Configure logging
 logging.basicConfig(
@@ -276,6 +284,269 @@ def get_sync_status():
     return jsonify({
         "enabled": is_wallet_registered(wallet)
     })
+
+
+# =============================================================================
+# Sentiment Bot Endpoints
+# =============================================================================
+
+def _get_sentiment_bot():
+    """Get or create the sentiment bot instance."""
+    from sentiment import get_sentiment_bot, create_sentiment_bot
+
+    bot = get_sentiment_bot()
+    if bot is None and all([DATABASE_URL, ANTHROPIC_API_KEY, DISCORD_WEBHOOK_URL]):
+        bot = create_sentiment_bot(
+            database_url=DATABASE_URL,
+            anthropic_api_key=ANTHROPIC_API_KEY,
+            discord_webhook_url=DISCORD_WEBHOOK_URL,
+            cryptopanic_api_key=CRYPTOPANIC_API_KEY,
+            poll_interval=SENTIMENT_POLL_INTERVAL
+        )
+    return bot
+
+
+def _check_sentiment_config() -> tuple[bool, str]:
+    """Check if sentiment bot is properly configured."""
+    missing = []
+    if not DATABASE_URL:
+        missing.append("DATABASE_URL")
+    if not ANTHROPIC_API_KEY:
+        missing.append("ANTHROPIC_API_KEY")
+    if not DISCORD_WEBHOOK_URL:
+        missing.append("DISCORD_WEBHOOK_URL")
+
+    if missing:
+        return False, f"Missing config: {', '.join(missing)}"
+    return True, ""
+
+
+@app.route("/api/signals", methods=["GET"])
+def get_signals():
+    """Get sentiment signal history."""
+    # Optional filters
+    limit = request.args.get("limit", 50, type=int)
+    sentiment = request.args.get("sentiment")
+    asset = request.args.get("asset")
+    actionable_only = request.args.get("actionable", "false").lower() == "true"
+
+    try:
+        from sentiment import get_sentiment_session, SignalRepository, init_sentiment_db
+
+        if not init_sentiment_db(DATABASE_URL):
+            return jsonify({"error": "Database not configured"}), 500
+
+        session = get_sentiment_session()
+        if not session:
+            return jsonify({"error": "Could not connect to database"}), 500
+
+        try:
+            repo = SignalRepository(session)
+            signals = repo.get_recent_signals(
+                limit=min(limit, 200),
+                sentiment=sentiment,
+                asset=asset.upper() if asset else None,
+                actionable_only=actionable_only
+            )
+
+            return jsonify({
+                "signals": [s.to_dict() for s in signals],
+                "count": len(signals)
+            })
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.exception("Failed to fetch signals: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signals/stats", methods=["GET"])
+def get_signal_stats():
+    """Get sentiment signal statistics."""
+    hours = request.args.get("hours", 24, type=int)
+
+    try:
+        from sentiment import get_sentiment_session, SignalRepository, init_sentiment_db
+
+        if not init_sentiment_db(DATABASE_URL):
+            return jsonify({"error": "Database not configured"}), 500
+
+        session = get_sentiment_session()
+        if not session:
+            return jsonify({"error": "Could not connect to database"}), 500
+
+        try:
+            repo = SignalRepository(session)
+            stats = repo.get_signal_stats(hours=min(hours, 168))  # Max 1 week
+            return jsonify(stats)
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.exception("Failed to fetch signal stats: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signals/enable", methods=["POST"])
+def enable_sentiment_bot():
+    """Enable the sentiment analysis bot."""
+    # Check configuration
+    configured, error_msg = _check_sentiment_config()
+    if not configured:
+        return jsonify({"error": error_msg}), 400
+
+    data = request.get_json() or {}
+    poll_interval = data.get("poll_interval", SENTIMENT_POLL_INTERVAL)
+
+    # Validate interval (1-60 minutes)
+    if not isinstance(poll_interval, int) or poll_interval < 60 or poll_interval > 3600:
+        return jsonify({"error": "Poll interval must be between 60 and 3600 seconds"}), 400
+
+    try:
+        bot = _get_sentiment_bot()
+        if bot is None:
+            return jsonify({"error": "Failed to create bot instance"}), 500
+
+        if bot.is_running():
+            return jsonify({
+                "message": "Sentiment bot is already running",
+                "stats": bot.get_stats()
+            })
+
+        # Update interval if different
+        if poll_interval != bot.poll_interval:
+            bot.set_poll_interval(poll_interval)
+
+        success = bot.start(send_startup_message=True)
+
+        if success:
+            return jsonify({
+                "message": "Sentiment bot started",
+                "poll_interval": bot.poll_interval,
+                "stats": bot.get_stats()
+            })
+        else:
+            return jsonify({"error": "Failed to start sentiment bot"}), 500
+
+    except Exception as e:
+        logger.exception("Failed to enable sentiment bot: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signals/disable", methods=["POST"])
+def disable_sentiment_bot():
+    """Disable the sentiment analysis bot."""
+    try:
+        from sentiment import get_sentiment_bot
+
+        bot = get_sentiment_bot()
+        if bot is None or not bot.is_running():
+            return jsonify({"message": "Sentiment bot is not running"})
+
+        success = bot.stop(send_shutdown_message=True)
+
+        if success:
+            return jsonify({"message": "Sentiment bot stopped"})
+        else:
+            return jsonify({"error": "Failed to stop sentiment bot"}), 500
+
+    except Exception as e:
+        logger.exception("Failed to disable sentiment bot: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signals/status", methods=["GET"])
+def get_sentiment_status():
+    """Get sentiment bot status."""
+    configured, error_msg = _check_sentiment_config()
+
+    try:
+        from sentiment import get_sentiment_bot
+
+        bot = get_sentiment_bot()
+
+        return jsonify({
+            "configured": configured,
+            "config_error": error_msg if not configured else None,
+            "is_running": bot.is_running() if bot else False,
+            "stats": bot.get_stats() if bot else None
+        })
+
+    except Exception as e:
+        logger.exception("Failed to get sentiment status: %s", e)
+        return jsonify({
+            "configured": configured,
+            "config_error": error_msg if not configured else None,
+            "is_running": False,
+            "error": str(e)
+        })
+
+
+@app.route("/api/signals/poll", methods=["POST"])
+def trigger_sentiment_poll():
+    """Trigger an immediate sentiment poll."""
+    try:
+        from sentiment import get_sentiment_bot
+
+        bot = get_sentiment_bot()
+        if bot is None or not bot.is_running():
+            return jsonify({"error": "Sentiment bot is not running"}), 400
+
+        result = bot.poll_now()
+        return jsonify(result)
+
+    except Exception as e:
+        logger.exception("Failed to trigger poll: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signals/test", methods=["POST"])
+def test_sentiment_alert():
+    """Send a test alert to Discord."""
+    configured, error_msg = _check_sentiment_config()
+    if not configured:
+        return jsonify({"error": error_msg}), 400
+
+    try:
+        bot = _get_sentiment_bot()
+        if bot is None:
+            return jsonify({"error": "Failed to create bot instance"}), 500
+
+        success = bot.send_test_alert()
+
+        if success:
+            return jsonify({"message": "Test alert sent to Discord"})
+        else:
+            return jsonify({"error": "Failed to send test alert"}), 500
+
+    except Exception as e:
+        logger.exception("Failed to send test alert: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/signals/webhook/test", methods=["POST"])
+def test_discord_webhook():
+    """Test Discord webhook connection."""
+    configured, error_msg = _check_sentiment_config()
+    if not configured:
+        return jsonify({"error": error_msg}), 400
+
+    try:
+        bot = _get_sentiment_bot()
+        if bot is None:
+            return jsonify({"error": "Failed to create bot instance"}), 500
+
+        success = bot.test_discord()
+
+        if success:
+            return jsonify({"message": "Discord webhook is working"})
+        else:
+            return jsonify({"error": "Discord webhook test failed"}), 500
+
+    except Exception as e:
+        logger.exception("Failed to test webhook: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
