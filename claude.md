@@ -287,6 +287,35 @@ print(scheduler.get_jobs())  # List all scheduled jobs
 ### Overview
 The sentiment bot monitors crypto news and sends Discord alerts for potentially market-moving events. It uses Claude Haiku for AI-powered sentiment analysis.
 
+### Auto-Start
+The bot **automatically starts** when the server boots if all required environment variables are configured:
+- `DATABASE_URL`
+- `ANTHROPIC_API_KEY`
+- `DISCORD_WEBHOOK_URL`
+
+No manual intervention needed after deploys. The bot registers cleanup on exit and skips the startup Discord message to avoid spam on redeploys.
+
+### Manual Control
+```bash
+# Check status
+curl https://hl-journal.xyz/api/signals/status
+
+# Enable bot (if not auto-started)
+curl -X POST https://hl-journal.xyz/api/signals/enable -H "Content-Type: application/json" -d '{}'
+
+# Disable bot
+curl -X POST https://hl-journal.xyz/api/signals/disable -H "Content-Type: application/json" -d '{}'
+
+# Trigger immediate poll
+curl -X POST https://hl-journal.xyz/api/signals/poll -H "Content-Type: application/json" -d '{}'
+
+# Send test alert
+curl -X POST https://hl-journal.xyz/api/signals/test -H "Content-Type: application/json" -d '{}'
+
+# Debug news pipeline
+curl https://hl-journal.xyz/api/signals/debug
+```
+
 ### Architecture Flow
 ```
 EVERY 5 MINUTES (configurable):
