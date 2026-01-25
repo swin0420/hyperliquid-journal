@@ -567,8 +567,26 @@ def debug_sentiment():
             "total_fetched": 0,
             "new_items": 0,
             "already_processed": 0,
-            "sample_analysis": None
+            "sample_analysis": None,
+            "raw_api_test": None
         }
+
+        # Raw API test to debug connection issues
+        try:
+            import requests
+            raw_resp = requests.get(
+                "https://min-api.cryptocompare.com/data/v2/news/",
+                params={"lang": "EN", "sortOrder": "latest"},
+                timeout=10
+            )
+            raw_data = raw_resp.json()
+            result["raw_api_test"] = {
+                "status_code": raw_resp.status_code,
+                "total_items": len(raw_data.get("Data", [])),
+                "sample_title": raw_data.get("Data", [{}])[0].get("title", "N/A")[:80] if raw_data.get("Data") else None
+            }
+        except Exception as e:
+            result["raw_api_test"] = {"error": str(e)}
 
         # Create aggregator and fetch news
         aggregator = NewsAggregator(
